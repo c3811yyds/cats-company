@@ -1,0 +1,468 @@
+// CatsBot — main SDK class for connecting to Cats Company via WebSocket.
+
+import WebSocket from 'ws';
+import { EventEmitter } from 'events';
+import type {
+  CatsBotConfig,
+  BotEventMap,
+  ClientMessage,
+  ServerMessage,
+  MsgServerCtrl,
+  MsgServerData,
+  MessageContent,
+  RichContentImage,
+  RichContentFile,
+  RichContentLinkPreview,
+  RichContentCard,
+  UploadResult,
+} from './types';
+import { ConnectionError, HandshakeError, ProtocolError, RateLimitError } from './errors';
+import { MessageContext } from './context';
+import { FileUploader } from './uploader';
+
+interface PendingAck {
+  resolve: (seq: number) => void;
+  reject: (err: Error) => void;
+  timer: ReturnType<typeof setTimeout>;
+}
+
+export class CatsBot {
+  public uid = '';
+
+  private readonly config: Required<CatsBotConfig>;
+  private readonly emitter = new EventEmitter();
+  private readonly uploader: FileUploader;
+  private readonly pendingAcks = new Map<string, PendingAck>();
+
+  private ws: WebSocket | null = null;
+  private msgId = 0;
+  private reconnectAttempt = 0;
+  private closed = false;
+  private pingTimer: ReturnType<typeof setTimeout> | null = null;
+
+  constructor(config: CatsBotConfig) {
+    const httpBase = config.httpBaseUrl ?? deriveHttpBase(config.serverUrl);
+    this.config = {
+      serverUrl: config.serverUrl,
+      apiKey: config.apiKey,
+      httpBaseUrl: httpBase,
+      reconnectDelay: config.reconnectDelay ?? 3000,
+      pingTimeout: config.pingTimeout ?? 70000,
+    };
+    this.uploader = new FileUploader(this.config.httpBaseUrl, this.config.apiKey);
+  }
+
+  // --- Typed event emitter ---
+
+  on<K extends keyof BotEventMap>(event: K, listener: BotEventMap[K]): this {
+    this.emitter.on(event, listener as (...args: any[]) => void);
+    return this;
+  }
+
+  off<K extends keyof BotEventMap>(event: K, listener: BotEventMap[K]): this {
+    this.emitter.off(event, listener as (...args: any[]) => void);
+    return this;
+  }
+
+  once<K extends keyof BotEventMap>(event: K, listener: BotEventMap[K]): this {
+    this.emitter.once(event, listener as (...args: any[]) => void);
+    return this;
+  }
+
+  private emit<K extends keyof BotEventMap>(event: K, ...args: Parameters<BotEventMap[K]>): void {
+    this.emitter.emit(event, ...args);
+  }
+
+  // --- Connection lifecycle ---
+
+  /**
+   * Open the WebSocket connection and perform the handshake.
+   * Resolves when the handshake ctrl 200 is received.
+   */
+  connect(): Promise<void> {
+    this.closed = false;
+    return this.doConnect();
+  }
+
+  /**
+   * Connect and block until the process is interrupted or disconnect() is called.
+   */
+  async run(): Promise<void> {
+    await this.connect();
+    // Keep the process alive
+    return new Promise<void>((resolve) => {
+      this.once('disconnect', () => {
+        if (this.closed) resolve();
+      });
+    });
+  }
+
+  /**
+   * Gracefully close the connection. No automatic reconnect.
+   */
+  disconnect(): void {
+    this.closed = true;
+    this.clearPingTimer();
+    this.rejectAllPending(new ConnectionError('Disconnected'));
+    if (this.ws) {
+      this.ws.close(1000, 'bot disconnect');
+      this.ws = null;
+    }
+  }
+
+  // --- Sending messages ---
+
+  /**
+   * Publish a message to a topic. Returns the server-assigned seq number.
+   */
+  sendMessage(topic: string, content: MessageContent, replyTo?: number): Promise<number> {
+    const id = this.nextId();
+    const pub: ClientMessage = {
+      pub: { id, topic, content, reply_to: replyTo },
+    };
+    return this.sendWithAck(id, pub);
+  }
+
+  /** Send an image message (from an UploadResult). */
+  sendImage(
+    topic: string,
+    upload: UploadResult,
+    opts?: { width?: number; height?: number },
+  ): Promise<number> {
+    const content: RichContentImage = {
+      type: 'image',
+      payload: {
+        url: upload.url,
+        name: upload.name,
+        size: upload.size,
+        ...opts,
+      },
+    };
+    return this.sendMessage(topic, content);
+  }
+
+  /** Send a file message (from an UploadResult). */
+  sendFile(topic: string, upload: UploadResult, mimeType?: string): Promise<number> {
+    const content: RichContentFile = {
+      type: 'file',
+      payload: {
+        url: upload.url,
+        name: upload.name,
+        size: upload.size,
+        mime_type: mimeType,
+      },
+    };
+    return this.sendMessage(topic, content);
+  }
+
+  /** Send a link preview card. */
+  sendLinkPreview(
+    topic: string,
+    payload: RichContentLinkPreview['payload'],
+  ): Promise<number> {
+    const content: RichContentLinkPreview = { type: 'link_preview', payload };
+    return this.sendMessage(topic, content);
+  }
+
+  /** Send a rich card. */
+  sendCard(topic: string, payload: RichContentCard['payload']): Promise<number> {
+    const content: RichContentCard = { type: 'card', payload };
+    return this.sendMessage(topic, content);
+  }
+
+  // --- Notifications ---
+
+  /** Send a typing indicator. */
+  sendTyping(topic: string): void {
+    this.sendRaw({ note: { topic, what: 'kp' } });
+  }
+
+  /** Send a read receipt for messages up to seq. */
+  sendReadReceipt(topic: string, seq: number): void {
+    this.sendRaw({ note: { topic, what: 'read', seq } });
+  }
+
+  // --- History ---
+
+  /** Fetch message history for a topic since a given seq. */
+  getHistory(topic: string, sinceSeq = 0): Promise<MsgServerData[]> {
+    const id = this.nextId();
+    const messages: MsgServerData[] = [];
+
+    return new Promise<MsgServerData[]>((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        cleanup();
+        reject(new ProtocolError(0, 'History request timed out'));
+      }, 15000);
+
+      const onData = (ctx: MessageContext) => {
+        if (ctx.topic === topic) {
+          messages.push({
+            topic: ctx.topic,
+            from: ctx.from,
+            seq: ctx.seq,
+            content: ctx.content,
+            reply_to: ctx.replyTo,
+          });
+        }
+      };
+
+      const onCtrl = (ctrl: MsgServerCtrl) => {
+        if (ctrl.id === id && ctrl.code === 200) {
+          cleanup();
+          resolve(messages);
+        } else if (ctrl.id === id) {
+          cleanup();
+          reject(new ProtocolError(ctrl.code, ctrl.text));
+        }
+      };
+
+      const cleanup = () => {
+        clearTimeout(timeout);
+        this.off('message', onData);
+        this.off('ctrl', onCtrl);
+      };
+
+      // Temporarily listen for data messages that arrive as history
+      this.on('message', onData);
+      this.on('ctrl', onCtrl);
+
+      this.sendRaw({ get: { id, topic, what: 'history', seq: sinceSeq } });
+    });
+  }
+
+  // --- File upload ---
+
+  /** Upload a file from disk path. */
+  uploadFile(filePath: string, type: 'image' | 'file' = 'file'): Promise<UploadResult> {
+    return this.uploader.upload(filePath, type);
+  }
+
+  /** Upload a buffer. */
+  uploadBuffer(
+    buffer: Buffer,
+    filename: string,
+    type: 'image' | 'file' = 'file',
+  ): Promise<UploadResult> {
+    return this.uploader.uploadBuffer(buffer, filename, type);
+  }
+
+  // --- Internal ---
+
+  private nextId(): string {
+    return String(++this.msgId);
+  }
+
+  private sendRaw(msg: ClientMessage): void {
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+      throw new ConnectionError('WebSocket is not connected');
+    }
+    this.ws.send(JSON.stringify(msg));
+  }
+
+  private sendWithAck(id: string, msg: ClientMessage): Promise<number> {
+    return new Promise<number>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.pendingAcks.delete(id);
+        reject(new ProtocolError(0, 'Ack timeout'));
+      }, 10000);
+
+      this.pendingAcks.set(id, { resolve, reject, timer });
+      try {
+        this.sendRaw(msg);
+      } catch (err) {
+        clearTimeout(timer);
+        this.pendingAcks.delete(id);
+        reject(err);
+      }
+    });
+  }
+
+  private resolveAck(ctrl: MsgServerCtrl): boolean {
+    if (!ctrl.id) return false;
+    const pending = this.pendingAcks.get(ctrl.id);
+    if (!pending) return false;
+
+    clearTimeout(pending.timer);
+    this.pendingAcks.delete(ctrl.id);
+
+    if (ctrl.code === 200) {
+      const seq = (ctrl.params as any)?.seq ?? 0;
+      pending.resolve(typeof seq === 'number' ? seq : 0);
+    } else if (ctrl.code === 429) {
+      pending.reject(new RateLimitError(ctrl.text));
+    } else {
+      pending.reject(new ProtocolError(ctrl.code, ctrl.text));
+    }
+    return true;
+  }
+
+  private rejectAllPending(err: Error): void {
+    for (const [id, pending] of this.pendingAcks) {
+      clearTimeout(pending.timer);
+      pending.reject(err);
+    }
+    this.pendingAcks.clear();
+  }
+
+  private doConnect(): Promise<void> {
+    return new Promise<void>((resolve, reject) => {
+      const url = `${this.config.serverUrl}?api_key=${this.config.apiKey}`;
+      let handshakeDone = false;
+
+      try {
+        this.ws = new WebSocket(url);
+      } catch (err: any) {
+        reject(new ConnectionError(`Failed to create WebSocket: ${err.message}`));
+        return;
+      }
+
+      const handshakeTimeout = setTimeout(() => {
+        if (!handshakeDone) {
+          handshakeDone = true;
+          this.ws?.close();
+          reject(new HandshakeError('Handshake timed out'));
+        }
+      }, 10000);
+
+      this.ws.on('open', () => {
+        // Send handshake
+        const id = this.nextId();
+        this.sendRaw({ hi: { id, ver: '0.1.0' } });
+      });
+
+      this.ws.on('message', (raw: WebSocket.Data) => {
+        this.resetPingTimer();
+
+        let msg: ServerMessage;
+        try {
+          msg = JSON.parse(raw.toString());
+        } catch {
+          return;
+        }
+
+        // Handshake response
+        if (!handshakeDone && msg.ctrl) {
+          if (
+            msg.ctrl.code === 200 &&
+            (msg.ctrl.params as any)?.build === 'catscompany'
+          ) {
+            handshakeDone = true;
+            clearTimeout(handshakeTimeout);
+            this.uid = String((msg.ctrl.params as any)?.uid ?? '');
+            this.reconnectAttempt = 0;
+            this.emit('ready', this.uid);
+            resolve();
+            return;
+          } else {
+            handshakeDone = true;
+            clearTimeout(handshakeTimeout);
+            reject(new HandshakeError(`Handshake failed: code ${msg.ctrl.code}`));
+            return;
+          }
+        }
+
+        this.dispatch(msg);
+      });
+
+      this.ws.on('close', (code: number, reason: Buffer) => {
+        clearTimeout(handshakeTimeout);
+        this.clearPingTimer();
+        this.rejectAllPending(new ConnectionError('Connection closed'));
+        this.emit('disconnect', code, reason.toString());
+
+        if (!this.closed) {
+          this.scheduleReconnect();
+        }
+      });
+
+      this.ws.on('error', (err: Error) => {
+        this.emit('error', err);
+        if (!handshakeDone) {
+          handshakeDone = true;
+          clearTimeout(handshakeTimeout);
+          reject(new ConnectionError(err.message));
+        }
+      });
+
+      this.ws.on('ping', () => {
+        this.resetPingTimer();
+      });
+    });
+  }
+
+  private dispatch(msg: ServerMessage): void {
+    if (msg.ctrl) {
+      // Try to resolve a pending ack first
+      if (!this.resolveAck(msg.ctrl)) {
+        this.emit('ctrl', msg.ctrl);
+      }
+    }
+
+    if (msg.data) {
+      // Self-echo filter: skip messages from ourselves
+      if (msg.data.from === this.uid) return;
+
+      const ctx = new MessageContext(this, msg.data);
+      this.emit('message', ctx);
+    }
+
+    if (msg.pres) {
+      this.emit('presence', msg.pres);
+    }
+
+    if (msg.info) {
+      if (msg.info.what === 'kp') {
+        this.emit('typing', msg.info);
+      } else if (msg.info.what === 'read') {
+        this.emit('read', msg.info);
+      }
+    }
+  }
+
+  // --- Ping / heartbeat monitoring ---
+
+  private resetPingTimer(): void {
+    this.clearPingTimer();
+    this.pingTimer = setTimeout(() => {
+      // No ping received within timeout — force reconnect
+      if (this.ws) {
+        this.ws.close(4000, 'ping timeout');
+      }
+    }, this.config.pingTimeout);
+  }
+
+  private clearPingTimer(): void {
+    if (this.pingTimer) {
+      clearTimeout(this.pingTimer);
+      this.pingTimer = null;
+    }
+  }
+
+  // --- Auto-reconnect ---
+
+  private scheduleReconnect(): void {
+    this.reconnectAttempt++;
+    this.emit('reconnecting', this.reconnectAttempt);
+
+    setTimeout(async () => {
+      if (this.closed) return;
+      try {
+        await this.doConnect();
+      } catch {
+        // doConnect failure will trigger ws close → scheduleReconnect again
+      }
+    }, this.config.reconnectDelay);
+  }
+}
+
+// --- Helpers ---
+
+/** Derive an HTTP base URL from a WebSocket URL. */
+function deriveHttpBase(wsUrl: string): string {
+  const u = new URL(wsUrl);
+  u.protocol = u.protocol === 'wss:' ? 'https:' : 'http:';
+  u.pathname = '';
+  u.search = '';
+  return u.origin;
+}

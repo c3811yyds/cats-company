@@ -1,0 +1,94 @@
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: catscompany-mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: rootpass
+      MYSQL_DATABASE: openchat
+      MYSQL_USER: openchat
+      MYSQL_PASSWORD: openchat
+    ports:
+      - "3308:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./init-db.sql:/docker-entrypoint-initdb.d/01-init.sql
+    command: >
+      --character-set-server=utf8mb4
+      --collation-server=utf8mb4_unicode_ci
+      --default-authentication-plugin=mysql_native_password
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  server:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.server
+    container_name: catscompany-server
+    ports:
+      - "6061:6061"
+      - "6062:6062"
+    depends_on:
+      mysql:
+        condition: service_healthy
+    environment:
+      OC_DB_DSN: "openchat:openchat@tcp(mysql:3306)/openchat?parseTime=true&charset=utf8mb4"
+    volumes:
+      - uploads_data:/app/uploads
+
+  webapp:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.webapp
+    container_name: catscompany-webapp
+    ports:
+      - "3001:3000"
+    environment:
+      REACT_APP_API_BASE: ""
+
+  assistant:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.assistant
+    container_name: catscompany-assistant
+    depends_on:
+      - server
+    environment:
+      OPENCHAT_GRPC_ADDR: "server:6062"
+      BOT_USERNAME: "ai_assistant"
+      BOT_PASSWORD: "assistant123"
+      LLM_API_BASE: "${LLM_API_BASE:-https://api.openai.com/v1}"
+      LLM_API_KEY: "${LLM_API_KEY:-}"
+      LLM_MODEL: "${LLM_MODEL:-gpt-3.5-turbo}"
+
+  xiaoba-ts:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.xiaoba-ts
+    container_name: catscompany-xiaoba-ts
+    depends_on:
+      - server
+    environment:
+      BOT_API_KEY: "${XIAOBA_BOT_API_KEY:-}"
+      BOT_WS_URL: "ws://server:6061/v0/channels"
+      LLM_API_BASE: "${LLM_API_BASE:-https://api.openai.com/v1}"
+      LLM_API_KEY: "${LLM_API_KEY:-}"
+      LLM_MODEL: "${LLM_MODEL:-gpt-3.5-turbo}"
+      MAX_HISTORY: "20"
+
+  nginx:
+    image: nginx:alpine
+    container_name: catscompany-nginx
+    ports:
+      - "8081:80"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - server
+      - webapp
+
+volumes:
+  mysql_data:
+  uploads_data:

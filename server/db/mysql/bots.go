@@ -1,0 +1,127 @@
+// Package mysql - Cats Company bot configuration database operations.
+package mysql
+
+import (
+	"fmt"
+
+	"github.com/openchat/openchat/server/store/types"
+)
+
+// SaveBotConfig saves or updates bot configuration.
+func (a *Adapter) SaveBotConfig(uid int64, apiEndpoint, model string) error {
+	_, err := a.db.Exec(
+		`INSERT INTO bot_config (user_id, api_endpoint, model, enabled)
+		 VALUES (?, ?, ?, 1)
+		 ON DUPLICATE KEY UPDATE api_endpoint = ?, model = ?, updated_at = CURRENT_TIMESTAMP`,
+		uid, apiEndpoint, model, apiEndpoint, model,
+	)
+	return err
+}
+
+// GetBotConfig retrieves bot configuration by user ID.
+func (a *Adapter) GetBotConfig(uid int64) (*types.BotConfig, error) {
+	bc := &types.BotConfig{}
+	err := a.db.QueryRow(
+		`SELECT user_id, api_endpoint, model, enabled FROM bot_config WHERE user_id = ?`, uid,
+	).Scan(&bc.UserID, &bc.APIEndpoint, &bc.Model, &bc.Enabled)
+	if err != nil {
+		return nil, fmt.Errorf("get bot config: %w", err)
+	}
+	return bc, nil
+}
+
+// ListBots returns all bot users with their configs.
+func (a *Adapter) ListBots() ([]map[string]interface{}, error) {
+	rows, err := a.db.Query(
+		`SELECT u.id, u.username, u.display_name, u.avatar_url, u.state,
+		        COALESCE(b.api_endpoint, '') as api_endpoint,
+		        COALESCE(b.model, '') as model,
+		        COALESCE(b.enabled, 1) as enabled
+		 FROM users u LEFT JOIN bot_config b ON u.id = b.user_id
+		 WHERE u.account_type = 'bot'
+		 ORDER BY u.created_at`,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("list bots: %w", err)
+	}
+	defer rows.Close()
+
+	var bots []map[string]interface{}
+	for rows.Next() {
+		var id int64
+		var username, displayName, avatarURL, apiEndpoint, model string
+		var state int
+		var enabled bool
+		if err := rows.Scan(&id, &username, &displayName, &avatarURL, &state, &apiEndpoint, &model, &enabled); err != nil {
+			return nil, err
+		}
+		bots = append(bots, map[string]interface{}{
+			"id":           id,
+			"username":     username,
+			"display_name": displayName,
+			"avatar_url":   avatarURL,
+			"state":        state,
+			"api_endpoint": apiEndpoint,
+			"model":        model,
+			"enabled":      enabled,
+		})
+	}
+	return bots, rows.Err()
+}
+
+// ToggleBotEnabled toggles the enabled state of a bot.
+func (a *Adapter) ToggleBotEnabled(uid int64) error {
+	_, err := a.db.Exec(
+		`UPDATE bot_config SET enabled = NOT enabled, updated_at = CURRENT_TIMESTAMP WHERE user_id = ?`,
+		uid,
+	)
+	return err
+}
+
+// SaveAPIKey stores or updates the API key for a bot.
+func (a *Adapter) SaveAPIKey(uid int64, apiKey string) error {
+	_, err := a.db.Exec(
+		`UPDATE bot_config SET api_key = ?, updated_at = CURRENT_TIMESTAMP WHERE user_id = ?`,
+		apiKey, uid,
+	)
+	return err
+}
+
+// GetBotDebugMessages returns recent messages sent by a bot, for debug purposes.
+func (a *Adapter) GetBotDebugMessages(uid int64, limit int) ([]*types.Message, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	rows, err := a.db.Query(
+		`SELECT id, topic_id, from_uid, content, msg_type, created_at
+		 FROM messages WHERE from_uid = ?
+		 ORDER BY id DESC LIMIT ?`,
+		uid, limit,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("get bot debug messages: %w", err)
+	}
+	defer rows.Close()
+
+	var msgs []*types.Message
+	for rows.Next() {
+		m := &types.Message{}
+		if err := rows.Scan(&m.ID, &m.TopicID, &m.FromUID, &m.Content, &m.MsgType, &m.CreatedAt); err != nil {
+			return nil, fmt.Errorf("scan debug message: %w", err)
+		}
+		msgs = append(msgs, m)
+	}
+	return msgs, rows.Err()
+}
+
+// GetBotByAPIKey looks up a bot's user ID by its API key.
+func (a *Adapter) GetBotByAPIKey(apiKey string) (int64, error) {
+	var uid int64
+	err := a.db.QueryRow(
+		`SELECT user_id FROM bot_config WHERE api_key = ? AND enabled = 1`, apiKey,
+	).Scan(&uid)
+	if err != nil {
+		return 0, fmt.Errorf("get bot by api key: %w", err)
+	}
+	return uid, nil
+}
