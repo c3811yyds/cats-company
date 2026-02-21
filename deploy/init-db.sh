@@ -1,6 +1,32 @@
--- OpenChat Database Initialization Script
-USE openchat;
+#!/bin/bash
+set -e
 
+# Wait for MySQL to be ready
+until mysql -u root -p"${MYSQL_ROOT_PASSWORD}" -e "SELECT 1" &> /dev/null; do
+  echo "Waiting for MySQL..."
+  sleep 2
+done
+
+# Generate bcrypt hash for bot password
+# Requires htpasswd (apache2-utils) or python3 with bcrypt
+if command -v python3 &> /dev/null; then
+  BOT_PASSWORD_HASH=$(python3 -c "
+import bcrypt
+import sys
+password = sys.argv[1].encode('utf-8')
+salt = bcrypt.gensalt(rounds=10)
+print(bcrypt.hashpw(password, salt).decode('utf-8'))
+" "${BOT_ASSISTANT_PASSWORD:-changeme}" 2>/dev/null || echo "")
+fi
+
+# Fallback: use a pre-generated hash for default password if python fails
+if [ -z "$BOT_PASSWORD_HASH" ]; then
+  # This is a bcrypt hash for "changeme" - should be replaced in production
+  BOT_PASSWORD_HASH='$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZRGdjGj/n3/ItB/XBG/eCknfIrqS6'
+fi
+
+# Run the SQL initialization
+mysql -u root -p"${MYSQL_ROOT_PASSWORD}" openchat <<EOF
 -- Users table
 CREATE TABLE IF NOT EXISTS users (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
@@ -82,7 +108,7 @@ CREATE TABLE IF NOT EXISTS rate_limits (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- Groups table
-CREATE TABLE IF NOT EXISTS `groups` (
+CREATE TABLE IF NOT EXISTS \`groups\` (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
     name VARCHAR(128) NOT NULL,
     owner_id BIGINT NOT NULL,
@@ -101,7 +127,7 @@ CREATE TABLE IF NOT EXISTS group_members (
     joined_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     UNIQUE KEY uk_group_user (group_id, user_id),
     INDEX idx_gm_user (user_id),
-    FOREIGN KEY (group_id) REFERENCES `groups`(id) ON DELETE CASCADE,
+    FOREIGN KEY (group_id) REFERENCES \`groups\`(id) ON DELETE CASCADE,
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
@@ -109,12 +135,15 @@ CREATE TABLE IF NOT EXISTS group_members (
 INSERT INTO rate_limits (account_type, max_per_second, max_per_minute, burst_size) VALUES
   ('human', 10, 120, 20),
   ('bot', 5, 60, 10),
-  ('service', 20, 300, 50);
+  ('service', 20, 300, 50)
+ON DUPLICATE KEY UPDATE max_per_second=VALUES(max_per_second);
 
--- Default AI assistant bot account
--- password: assistant123 (bcrypt hash)
-INSERT INTO users (username, display_name, account_type, pass_hash, state) VALUES
-  ('ai_assistant', 'AI 助手', 'bot', '$2a$10$abcdefghijklmnopqrstuuABCDEFGHIJKLMNOPQRSTUVWXYZ012', 0);
+-- Default AI assistant bot account (only if not exists)
+INSERT IGNORE INTO users (username, display_name, account_type, pass_hash, state) VALUES
+  ('ai_assistant', 'AI 助手', 'bot', '${BOT_PASSWORD_HASH}', 0);
 
-INSERT INTO bot_config (user_id, api_endpoint, model, enabled) VALUES
-  (LAST_INSERT_ID(), '', 'gpt-3.5-turbo', 1);
+INSERT IGNORE INTO bot_config (user_id, api_endpoint, model, enabled)
+  SELECT id, '', 'gpt-3.5-turbo', 1 FROM users WHERE username = 'ai_assistant';
+EOF
+
+echo "Database initialization complete."

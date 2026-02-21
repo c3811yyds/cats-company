@@ -60,6 +60,22 @@ func main() {
 	// HTTP routes
 	mux := http.NewServeMux()
 
+	// Health check endpoints (no auth required)
+	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("OK"))
+	})
+
+	mux.HandleFunc("/ready", func(w http.ResponseWriter, r *http.Request) {
+		if db.IsConnected() {
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte("READY"))
+		} else {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			w.Write([]byte("NOT READY"))
+		}
+	})
+
 	// Auth
 	mux.HandleFunc("/api/auth/register", userHandler.HandleRegister)
 	mux.HandleFunc("/api/auth/login", userHandler.HandleLogin)

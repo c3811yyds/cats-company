@@ -248,6 +248,7 @@ body {
   font-size: 15px;
   line-height: 1.5;
   word-break: break-word;
+  white-space: pre-wrap;
   position: relative;
   margin: 0 10px;
 }

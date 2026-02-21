@@ -20,6 +20,15 @@ Thumbs.db
 # Environment
 .env
 .env.local
+deploy/.env
+*.pem
+*.key
+
+# SSL certificates (keep README and script)
+deploy/nginx/ssl/privkey.pem
+deploy/nginx/ssl/fullchain.pem
+!deploy/nginx/ssl/README.md
+!deploy/nginx/ssl/generate-certs.sh
 
 # Data
 mysql_data/

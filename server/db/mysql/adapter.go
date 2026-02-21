@@ -47,3 +47,11 @@ func (a *Adapter) Close() error {
 func (a *Adapter) DB() *sql.DB {
 	return a.db
 }
+
+// IsConnected checks if the database connection is still alive.
+func (a *Adapter) IsConnected() bool {
+	if a.db == nil {
+		return false
+	}
+	return a.db.Ping() == nil
+}
