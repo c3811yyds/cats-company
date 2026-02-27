@@ -153,6 +153,43 @@ class APIClient {
         try await request(.post, "/api/groups/disband", body: ["group_id": groupId])
     }
 
+    // MARK: - Bots
+
+    private struct BotsResponse: Decodable { let bots: [Bot]? }
+
+    struct CreateBotResponse: Decodable {
+        let uid: Int64
+        let username: String
+        let apiKey: String?
+        let ownerId: Int64?
+
+        enum CodingKeys: String, CodingKey {
+            case uid, username
+            case apiKey = "api_key"
+            case ownerId = "owner_id"
+        }
+    }
+
+    func getMyBots() async throws -> [Bot] {
+        let resp: BotsResponse = try await request(.get, "/api/bots")
+        return resp.bots ?? []
+    }
+
+    func createBot(username: String, displayName: String) async throws -> CreateBotResponse {
+        try await request(.post, "/api/bots", body: [
+            "username": username,
+            "display_name": displayName
+        ])
+    }
+
+    func deleteBot(uid: Int64) async throws -> EmptyResponse {
+        try await request(.delete, "/api/bots?uid=\(uid)")
+    }
+
+    func setBotVisibility(uid: Int64, visibility: String) async throws -> EmptyResponse {
+        try await request(.post, "/api/bots/visibility?uid=\(uid)&v=\(visibility)")
+    }
+
     // MARK: - Upload
 
     func uploadImage(data: Data, filename: String) async throws -> UploadResponse {

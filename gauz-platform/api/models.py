@@ -48,6 +48,39 @@ class InviteCode(Base):
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
 
+class AgentMetrics(Base):
+    """Per-agent conversation quality metrics, reported by agent containers."""
+    __tablename__ = "agent_metrics"
+
+    id = Column(Integer, primary_key=True)
+    agent_id = Column(Integer, nullable=False, index=True)
+    total_messages = Column(Integer, default=0)
+    total_replies = Column(Integer, default=0)
+    total_errors = Column(Integer, default=0)
+    total_tokens_in = Column(Integer, default=0)
+    total_tokens_out = Column(Integer, default=0)
+    avg_latency_ms = Column(Integer, default=0)
+    p95_latency_ms = Column(Integer, default=0)
+    last_error = Column(String(512), default="")
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+
+class AgentQuota(Base):
+    """Per-agent resource quota and usage tracking."""
+    __tablename__ = "agent_quotas"
+
+    id = Column(Integer, primary_key=True)
+    agent_id = Column(Integer, unique=True, nullable=False, index=True)
+    daily_token_limit = Column(Integer, default=100000)
+    monthly_token_limit = Column(Integer, default=2000000)
+    daily_message_limit = Column(Integer, default=500)
+    daily_tokens_used = Column(Integer, default=0)
+    monthly_tokens_used = Column(Integer, default=0)
+    daily_messages_used = Column(Integer, default=0)
+    quota_reset_daily = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    quota_reset_monthly = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+
 def init_db():
     Base.metadata.create_all(engine)
 

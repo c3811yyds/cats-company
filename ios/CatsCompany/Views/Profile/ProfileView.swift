@@ -64,6 +64,26 @@ struct ProfileView: View {
                     .background(CatColor.cardBg)
                     .clipShape(RoundedRectangle(cornerRadius: CatLayout.radius))
 
+                    // Bot management
+                    NavigationLink {
+                        BotManagementView()
+                    } label: {
+                        HStack {
+                            Image(systemName: "cpu")
+                                .foregroundStyle(CatColor.primary)
+                            Text("我的机器人")
+                            Spacer()
+                            Image(systemName: "chevron.right")
+                                .font(.caption)
+                                .foregroundStyle(CatColor.textSecondary)
+                        }
+                        .foregroundStyle(CatColor.textPrimary)
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 14)
+                    }
+                    .background(CatColor.cardBg)
+                    .clipShape(RoundedRectangle(cornerRadius: CatLayout.radius))
+
                     // Clear cache button
                     Button {
                         MessageStore.shared.clearAllMessages()

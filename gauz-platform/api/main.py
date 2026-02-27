@@ -2,6 +2,7 @@
 
 import re
 import secrets
+from datetime import datetime, timezone
 
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -9,7 +10,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from auth import create_token, decode_token
-from models import init_db, get_db, User, Agent, InviteCode
+from models import init_db, get_db, User, Agent, InviteCode, AgentMetrics, AgentQuota
 from config import (
     LLM_PROXY_PROVIDER, LLM_PROXY_API_BASE, LLM_PROXY_API_KEY, LLM_PROXY_MODEL,
     GAUZMEM_URL, CATSCOMPANY_URL,
@@ -68,6 +69,22 @@ class CreateAgentReq(BaseModel):
 class UpdateSettingsReq(BaseModel):
     feishu_app_id: str = ""
     feishu_app_secret: str = ""
+
+class ReportMetricsReq(BaseModel):
+    agent_id: int
+    messages: int = 0
+    replies: int = 0
+    errors: int = 0
+    tokens_in: int = 0
+    tokens_out: int = 0
+    avg_latency_ms: int = 0
+    p95_latency_ms: int = 0
+    last_error: str = ""
+
+class SetQuotaReq(BaseModel):
+    daily_token_limit: int = 100000
+    monthly_token_limit: int = 2000000
+    daily_message_limit: int = 500
 
 
 # ── Auth endpoints ───────────────────────────────────
@@ -329,6 +346,160 @@ def restart_agent(
     return {"ok": ok, "message": msg}
 
 
+# ── Metrics endpoints ──────────────────────────────
+
+@app.post("/api/agents/{agent_id}/metrics")
+def report_metrics(
+    agent_id: int,
+    req: ReportMetricsReq,
+    db: Session = Depends(get_db),
+):
+    """Agent containers call this to report conversation metrics."""
+    agent = db.query(Agent).filter(Agent.id == agent_id).first()
+    if not agent:
+        raise HTTPException(404, "Agent not found")
+
+    m = db.query(AgentMetrics).filter(AgentMetrics.agent_id == agent_id).first()
+    if not m:
+        m = AgentMetrics(
+            agent_id=agent_id,
+            total_messages=0, total_replies=0, total_errors=0,
+            total_tokens_in=0, total_tokens_out=0,
+            avg_latency_ms=0, p95_latency_ms=0,
+        )
+        db.add(m)
+        db.flush()
+
+    m.total_messages = (m.total_messages or 0) + req.messages
+    m.total_replies = (m.total_replies or 0) + req.replies
+    m.total_errors = (m.total_errors or 0) + req.errors
+    m.total_tokens_in = (m.total_tokens_in or 0) + req.tokens_in
+    m.total_tokens_out = (m.total_tokens_out or 0) + req.tokens_out
+    if req.avg_latency_ms > 0:
+        m.avg_latency_ms = req.avg_latency_ms
+    if req.p95_latency_ms > 0:
+        m.p95_latency_ms = req.p95_latency_ms
+    if req.last_error:
+        m.last_error = req.last_error[:512]
+    m.updated_at = datetime.now(timezone.utc)
+    db.commit()
+
+    # Also update quota usage
+    _track_quota_usage(db, agent_id, req.tokens_in + req.tokens_out, req.messages)
+
+    return {"ok": True}
+
+
+@app.get("/api/agents/{agent_id}/metrics")
+def get_metrics(
+    agent_id: int,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Get conversation quality metrics for an agent."""
+    agent = db.query(Agent).filter(
+        Agent.id == agent_id, Agent.user_id == user.id
+    ).first()
+    if not agent:
+        raise HTTPException(404, "Agent not found")
+
+    m = db.query(AgentMetrics).filter(AgentMetrics.agent_id == agent_id).first()
+    if not m:
+        return {"metrics": None}
+
+    error_rate = 0.0
+    if m.total_replies > 0:
+        error_rate = round(m.total_errors / m.total_replies * 100, 1)
+
+    return {
+        "metrics": {
+            "total_messages": m.total_messages,
+            "total_replies": m.total_replies,
+            "total_errors": m.total_errors,
+            "error_rate_pct": error_rate,
+            "total_tokens_in": m.total_tokens_in,
+            "total_tokens_out": m.total_tokens_out,
+            "avg_latency_ms": m.avg_latency_ms,
+            "p95_latency_ms": m.p95_latency_ms,
+            "last_error": m.last_error,
+            "updated_at": m.updated_at.isoformat() if m.updated_at else None,
+        }
+    }
+
+
+# ── Quota endpoints ────────────────────────────────
+
+@app.get("/api/agents/{agent_id}/quota")
+def get_quota(
+    agent_id: int,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Get resource quota and usage for an agent."""
+    agent = db.query(Agent).filter(
+        Agent.id == agent_id, Agent.user_id == user.id
+    ).first()
+    if not agent:
+        raise HTTPException(404, "Agent not found")
+
+    q = _get_or_create_quota(db, agent_id)
+    _maybe_reset_quota(db, q)
+
+    return {
+        "quota": {
+            "daily_token_limit": q.daily_token_limit,
+            "monthly_token_limit": q.monthly_token_limit,
+            "daily_message_limit": q.daily_message_limit,
+            "daily_tokens_used": q.daily_tokens_used,
+            "monthly_tokens_used": q.monthly_tokens_used,
+            "daily_messages_used": q.daily_messages_used,
+        }
+    }
+
+
+@app.put("/api/agents/{agent_id}/quota")
+def set_quota(
+    agent_id: int,
+    req: SetQuotaReq,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Set resource quota limits for an agent."""
+    agent = db.query(Agent).filter(
+        Agent.id == agent_id, Agent.user_id == user.id
+    ).first()
+    if not agent:
+        raise HTTPException(404, "Agent not found")
+
+    q = _get_or_create_quota(db, agent_id)
+    q.daily_token_limit = req.daily_token_limit
+    q.monthly_token_limit = req.monthly_token_limit
+    q.daily_message_limit = req.daily_message_limit
+    db.commit()
+    return {"ok": True}
+
+
+@app.get("/api/agents/{agent_id}/quota/check")
+def check_quota(
+    agent_id: int,
+    db: Session = Depends(get_db),
+):
+    """Agent containers call this to check if they are within quota."""
+    q = db.query(AgentQuota).filter(AgentQuota.agent_id == agent_id).first()
+    if not q:
+        return {"allowed": True, "reason": ""}
+
+    _maybe_reset_quota(db, q)
+
+    if q.daily_tokens_used >= q.daily_token_limit:
+        return {"allowed": False, "reason": "daily_token_limit"}
+    if q.monthly_tokens_used >= q.monthly_token_limit:
+        return {"allowed": False, "reason": "monthly_token_limit"}
+    if q.daily_messages_used >= q.daily_message_limit:
+        return {"allowed": False, "reason": "daily_message_limit"}
+    return {"allowed": True, "reason": ""}
+
+
 # ── Admin endpoints ─────────────────────────────────
 
 @app.post("/api/admin/invite-codes")
@@ -355,3 +526,36 @@ def _agent_dict(a: Agent) -> dict:
         "status": a.status,
         "created_at": a.created_at.isoformat() if a.created_at else None,
     }
+
+
+def _get_or_create_quota(db: Session, agent_id: int) -> AgentQuota:
+    q = db.query(AgentQuota).filter(AgentQuota.agent_id == agent_id).first()
+    if not q:
+        q = AgentQuota(agent_id=agent_id)
+        db.add(q)
+        db.commit()
+        db.refresh(q)
+    return q
+
+
+def _maybe_reset_quota(db: Session, q: AgentQuota) -> None:
+    """Reset daily/monthly counters if the period has elapsed."""
+    now = datetime.utcnow()
+    if q.quota_reset_daily and (now - q.quota_reset_daily).days >= 1:
+        q.daily_tokens_used = 0
+        q.daily_messages_used = 0
+        q.quota_reset_daily = now
+    if q.quota_reset_monthly and (now - q.quota_reset_monthly).days >= 30:
+        q.monthly_tokens_used = 0
+        q.quota_reset_monthly = now
+    db.commit()
+
+
+def _track_quota_usage(db: Session, agent_id: int, tokens: int, messages: int) -> None:
+    """Increment quota usage counters."""
+    q = _get_or_create_quota(db, agent_id)
+    _maybe_reset_quota(db, q)
+    q.daily_tokens_used = (q.daily_tokens_used or 0) + tokens
+    q.monthly_tokens_used = (q.monthly_tokens_used or 0) + tokens
+    q.daily_messages_used = (q.daily_messages_used or 0) + messages
+    db.commit()

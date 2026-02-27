@@ -26,6 +26,10 @@
 		DFBE06B673260C17FB4E2826 /* ChatListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DF9F5FD15A6B668B413E3857 /* ChatListView.swift */; };
 		ECEE79854F74F3230EF127D4 /* CreateGroupView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5AC77553AD5C622EB7BCCAB5 /* CreateGroupView.swift */; };
 		F4EBFF64681E3A268EF486C7 /* MessageBubble.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8687B83162D5DB5EF384BD88 /* MessageBubble.swift */; };
+		B1A2C3D4E5F6071829304150 /* Bot.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2B3D4E5F60718293A4B5C60 /* Bot.swift */; };
+		D3E4F5061728394A5B6C7D80 /* BotManagementView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4F506172839405B6C7D8E90 /* BotManagementView.swift */; };
+		F5061728394A5B6C7D8E9FA0 /* BotRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 06172839405B6C7D8E9FA0B1 /* BotRow.swift */; };
+		17283940506B7C8D9EAFB0C1 /* CreateBotSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 28394050617C8D9EAFB0C1D2 /* CreateBotSheet.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -50,6 +54,10 @@
 		DF9F5FD15A6B668B413E3857 /* ChatListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatListView.swift; sourceTree = "<group>"; };
 		EFBF7FC08C77F8A0D52670CD /* Group.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Group.swift; sourceTree = "<group>"; };
 		FCE05B35822511844B1D8811 /* Theme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Theme.swift; sourceTree = "<group>"; };
+		C2B3D4E5F60718293A4B5C60 /* Bot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Bot.swift; sourceTree = "<group>"; };
+		E4F506172839405B6C7D8E90 /* BotManagementView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BotManagementView.swift; sourceTree = "<group>"; };
+		06172839405B6C7D8E9FA0B1 /* BotRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BotRow.swift; sourceTree = "<group>"; };
+		28394050617C8D9EAFB0C1D2 /* CreateBotSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CreateBotSheet.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXGroup section */
@@ -65,6 +73,7 @@
 			isa = PBXGroup;
 			children = (
 				E4A30473E17ECD8A264A6FD1 /* Auth */,
+				A1B2C3D4E5F607182930BOTS /* Bots */,
 				99509E26A5DBAB2DE8001FF8 /* Chats */,
 				D45D0714A9A741FA26EEF078 /* Contacts */,
 				B8CBAB722E6997FB2E4B053E /* Groups */,
@@ -102,6 +111,16 @@
 				7B85BC17309558293092ADE1 /* CatsCompany */,
 				F5E13D2E679AA1F1F14496DB /* Products */,
 			);
+			sourceTree = "<group>";
+		};
+		A1B2C3D4E5F607182930BOTS /* Bots */ = {
+			isa = PBXGroup;
+			children = (
+				E4F506172839405B6C7D8E90 /* BotManagementView.swift */,
+				06172839405B6C7D8E9FA0B1 /* BotRow.swift */,
+				28394050617C8D9EAFB0C1D2 /* CreateBotSheet.swift */,
+			);
+			path = Bots;
 			sourceTree = "<group>";
 		};
 		99509E26A5DBAB2DE8001FF8 /* Chats */ = {
@@ -168,6 +187,7 @@
 		E73FEF277CD0333B11A973E8 /* Models */ = {
 			isa = PBXGroup;
 			children = (
+				C2B3D4E5F60718293A4B5C60 /* Bot.swift */,
 				EFBF7FC08C77F8A0D52670CD /* Group.swift */,
 				6187ABD1B8C54B69A66C1112 /* Message.swift */,
 				0E32E29C1CF19765FB43C85E /* User.swift */,
@@ -240,10 +260,14 @@
 				6AD33C64CD9F0D15E4CC1A27 /* AddFriendView.swift in Sources */,
 				8CDC8B1E247680F18E019BED /* AuthManager.swift in Sources */,
 				BFA970C1E0BD2482D6CE2AA1 /* AvatarView.swift in Sources */,
+				B1A2C3D4E5F6071829304150 /* Bot.swift in Sources */,
+				D3E4F5061728394A5B6C7D80 /* BotManagementView.swift in Sources */,
+				F5061728394A5B6C7D8E9FA0 /* BotRow.swift in Sources */,
 				999E41D0A53341F6099F10D1 /* CatsCompanyApp.swift in Sources */,
 				CC4FB643D42C1312C34C2F57 /* ChatDetailView.swift in Sources */,
 				DFBE06B673260C17FB4E2826 /* ChatListView.swift in Sources */,
 				619B0B2D519E69E55FE0DF54 /* ContactsView.swift in Sources */,
+				17283940506B7C8D9EAFB0C1 /* CreateBotSheet.swift in Sources */,
 				ECEE79854F74F3230EF127D4 /* CreateGroupView.swift in Sources */,
 				741472AF57CFD4451286F964 /* Group.swift in Sources */,
 				DE7172395BB1A8DBA784E4B2 /* LoginView.swift in Sources */,
