@@ -17,10 +17,74 @@ struct WSHi: Encodable {
     let ua: String = "CatsCompany-iOS/1.0"
 }
 
+/// Wraps either a plain text string or a rich JSON object for pub content.
+enum WSPubContent: Encodable {
+    case text(String)
+    case rich([String: Any])
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        switch self {
+        case .text(let s):
+            try container.encode(s)
+        case .rich(let dict):
+            let data = try JSONSerialization.data(withJSONObject: dict)
+            let raw = try JSONDecoder().decode(AnyEncodable.self, from: data)
+            try container.encode(raw)
+        }
+    }
+}
+
+/// Helper to encode arbitrary JSON values.
+private struct AnyEncodable: Encodable, Decodable {
+    let value: Any
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        if let dict = try? container.decode([String: AnyEncodable].self) {
+            value = dict.mapValues { $0.value }
+        } else if let arr = try? container.decode([AnyEncodable].self) {
+            value = arr.map { $0.value }
+        } else if let s = try? container.decode(String.self) {
+            value = s
+        } else if let i = try? container.decode(Int.self) {
+            value = i
+        } else if let d = try? container.decode(Double.self) {
+            value = d
+        } else if let b = try? container.decode(Bool.self) {
+            value = b
+        } else {
+            value = NSNull()
+        }
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        if let dict = value as? [String: Any] {
+            let wrapped = dict.mapValues { AnyEncodable(value: $0) }
+            try container.encode(wrapped)
+        } else if let arr = value as? [Any] {
+            try container.encode(arr.map { AnyEncodable(value: $0) })
+        } else if let s = value as? String {
+            try container.encode(s)
+        } else if let i = value as? Int {
+            try container.encode(i)
+        } else if let d = value as? Double {
+            try container.encode(d)
+        } else if let b = value as? Bool {
+            try container.encode(b)
+        } else {
+            try container.encodeNil()
+        }
+    }
+
+    init(value: Any) { self.value = value }
+}
+
 struct WSPub: Encodable {
     let id: String
     let topic: String
-    let content: String
+    let content: WSPubContent
     var replyTo: Int?
 
     enum CodingKeys: String, CodingKey {

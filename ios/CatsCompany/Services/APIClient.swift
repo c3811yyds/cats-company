@@ -192,12 +192,25 @@ class APIClient {
 
     // MARK: - Upload
 
+    struct UploadResponse: Decodable {
+        let url: String
+        let name: String?
+        let size: Int?
+        let type: String?
+        let fileKey: String?
+
+        enum CodingKeys: String, CodingKey {
+            case url, name, size, type
+            case fileKey = "file_key"
+        }
+    }
+
     func uploadImage(data: Data, filename: String) async throws -> UploadResponse {
         try await upload("/api/upload?type=image", data: data, filename: filename, mimeType: "image/jpeg")
     }
 
-    struct UploadResponse: Decodable {
-        let url: String
+    func uploadFile(data: Data, filename: String, mimeType: String = "application/octet-stream") async throws -> UploadResponse {
+        try await upload("/api/upload?type=file", data: data, filename: filename, mimeType: mimeType)
     }
 
     // MARK: - Internal

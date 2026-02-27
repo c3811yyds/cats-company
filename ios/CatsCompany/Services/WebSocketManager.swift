@@ -97,7 +97,15 @@ class WebSocketManager: ObservableObject {
     @discardableResult
     func sendMessage(topic: String, content: String, replyTo: Int? = nil) -> String {
         let msgId = nextId()
-        let pub = WSPub(id: msgId, topic: topic, content: content, replyTo: replyTo)
+        let pub = WSPub(id: msgId, topic: topic, content: .text(content), replyTo: replyTo)
+        send(ClientMessage(pub: pub))
+        return msgId
+    }
+
+    @discardableResult
+    func sendRichMessage(topic: String, content: [String: Any], replyTo: Int? = nil) -> String {
+        let msgId = nextId()
+        let pub = WSPub(id: msgId, topic: topic, content: .rich(content), replyTo: replyTo)
         send(ClientMessage(pub: pub))
         return msgId
     }

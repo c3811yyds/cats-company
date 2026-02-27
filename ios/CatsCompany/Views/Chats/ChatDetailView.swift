@@ -1,4 +1,6 @@
 import SwiftUI
+import PhotosUI
+import UniformTypeIdentifiers
 
 struct ChatDetailView: View {
     let topicId: String
@@ -14,6 +16,13 @@ struct ChatDetailView: View {
     @State private var isLoading = true
     @State private var pendingMsgIds: [String: Int] = [:] // wsId -> index in messages
     @State private var tempSeqCounter = -1
+
+    // Attachment
+    @State private var showAttachmentMenu = false
+    @State private var showPhotoPicker = false
+    @State private var showDocumentPicker = false
+    @State private var selectedPhotoItem: PhotosPickerItem?
+    @State private var isUploading = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -53,9 +62,10 @@ struct ChatDetailView: View {
             }
 
             // Typing indicator
-            if let who = typingUser {
-                HStack {
-                    Text("\(who) 正在输入...")
+            if typingUser != nil {
+                HStack(spacing: 4) {
+                    TypingDotsView()
+                    Text("\(title) 正在输入...")
                         .font(.caption)
                         .foregroundStyle(CatColor.textSecondary)
                     Spacer()
@@ -63,6 +73,7 @@ struct ChatDetailView: View {
                 .padding(.horizontal, 16)
                 .padding(.vertical, 4)
                 .background(CatColor.chatBg)
+                .transition(.opacity)
             }
 
             // Reply preview
@@ -95,7 +106,40 @@ struct ChatDetailView: View {
                 CatColor.border
                     .frame(height: 0.5)
 
+                // Upload progress
+                if isUploading {
+                    HStack(spacing: 6) {
+                        ProgressView()
+                            .scaleEffect(0.8)
+                        Text("正在上传...")
+                            .font(.caption)
+                            .foregroundStyle(CatColor.textSecondary)
+                        Spacer()
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 4)
+                }
+
                 HStack(spacing: 8) {
+                    // Attachment button
+                    Menu {
+                        Button {
+                            showPhotoPicker = true
+                        } label: {
+                            Label("相册", systemImage: "photo.on.rectangle")
+                        }
+                        Button {
+                            showDocumentPicker = true
+                        } label: {
+                            Label("文件", systemImage: "doc")
+                        }
+                    } label: {
+                        Image(systemName: "plus.circle.fill")
+                            .font(.title2)
+                            .foregroundStyle(CatColor.primary)
+                    }
+                    .disabled(isUploading)
+
                     TextField("输入消息...", text: $inputText, axis: .vertical)
                         .padding(.horizontal, 12)
                         .padding(.vertical, 8)
@@ -143,6 +187,18 @@ struct ChatDetailView: View {
         .task { await loadMessages() }
         .onAppear { setupWSHandlers() }
         .onDisappear { clearWSHandlers() }
+        .photosPicker(isPresented: $showPhotoPicker, selection: $selectedPhotoItem, matching: .images)
+        .onChange(of: selectedPhotoItem) {
+            guard let item = selectedPhotoItem else { return }
+            selectedPhotoItem = nil
+            Task { await handlePhotoPick(item) }
+        }
+        .sheet(isPresented: $showDocumentPicker) {
+            DocumentPickerView { urls in
+                guard let url = urls.first else { return }
+                Task { await handleFilePick(url) }
+            }
+        }
     }
 
     private func shouldShowDate(at index: Int) -> Bool {
@@ -190,7 +246,8 @@ struct ChatDetailView: View {
             if info.what == "kp" {
                 typingUser = info.from
                 Task {
-                    try? await Task.sleep(nanoseconds: 3_000_000_000)
+                    // 30s timeout — bot processing can take a while
+                    try? await Task.sleep(nanoseconds: 30_000_000_000)
                     if typingUser == info.from {
                         typingUser = nil
                     }
@@ -257,5 +314,92 @@ struct ChatDetailView: View {
 
     private func hideKeyboard() {
         UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+    }
+
+    // MARK: - Attachment Upload
+
+    private func handlePhotoPick(_ item: PhotosPickerItem) async {
+        guard let data = try? await item.loadTransferable(type: Data.self) else { return }
+        let filename = "photo_\(Int(Date().timeIntervalSince1970)).jpg"
+        isUploading = true
+        do {
+            let resp = try await APIClient.shared.uploadImage(data: data, filename: filename)
+            sendRichContent(type: "image", url: resp.url, name: resp.name ?? filename, size: resp.size)
+        } catch {
+            print("Image upload error: \(error)")
+        }
+        isUploading = false
+    }
+
+    private func handleFilePick(_ url: URL) async {
+        guard url.startAccessingSecurityScopedResource() else { return }
+        defer { url.stopAccessingSecurityScopedResource() }
+
+        guard let data = try? Data(contentsOf: url) else { return }
+        let filename = url.lastPathComponent
+        let mimeType = mimeTypeFor(filename)
+        let isImage = ["image/jpeg", "image/png", "image/gif", "image/webp"].contains(mimeType)
+
+        isUploading = true
+        do {
+            let resp = isImage
+                ? try await APIClient.shared.uploadImage(data: data, filename: filename)
+                : try await APIClient.shared.uploadFile(data: data, filename: filename, mimeType: mimeType)
+            sendRichContent(
+                type: isImage ? "image" : "file",
+                url: resp.url,
+                name: resp.name ?? filename,
+                size: resp.size ?? data.count
+            )
+        } catch {
+            print("File upload error: \(error)")
+        }
+        isUploading = false
+    }
+
+    private func sendRichContent(type: String, url: String, name: String, size: Int? = nil) {
+        var payload: [String: Any] = ["url": url, "name": name]
+        if let size { payload["size"] = size }
+
+        let content: [String: Any] = ["type": type, "payload": payload]
+
+        let myUid = String(auth.currentUser?.id ?? 0)
+        let tempSeq = tempSeqCounter
+        tempSeqCounter -= 1
+
+        let rich = RichContent(
+            type: type,
+            url: url,
+            imageUrl: type == "image" ? url : nil,
+            fileName: name,
+            fileSize: size
+        )
+        let msg = Message(
+            id: nil, topicId: topicId, fromUid: myUid,
+            content: .rich(rich), seq: tempSeq
+        )
+        messages.append(msg)
+
+        let wsId = ws.sendRichMessage(topic: topicId, content: content)
+        pendingMsgIds[wsId] = messages.count - 1
+    }
+
+    private func mimeTypeFor(_ filename: String) -> String {
+        let ext = (filename as NSString).pathExtension.lowercased()
+        let map: [String: String] = [
+            "jpg": "image/jpeg", "jpeg": "image/jpeg", "png": "image/png",
+            "gif": "image/gif", "webp": "image/webp",
+            "pdf": "application/pdf",
+            "doc": "application/msword",
+            "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            "xls": "application/vnd.ms-excel",
+            "xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            "ppt": "application/vnd.ms-powerpoint",
+            "pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+            "zip": "application/zip", "txt": "text/plain", "md": "text/markdown",
+            "json": "application/json", "csv": "text/csv",
+            "mp3": "audio/mpeg", "mp4": "video/mp4", "wav": "audio/wav",
+        ]
+        return map[ext] ?? "application/octet-stream"
     }
 }

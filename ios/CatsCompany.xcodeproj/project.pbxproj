@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		AAAA1111BBBB2222CCCC3333 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = DDDD4444EEEE5555FFFF6666 /* Assets.xcassets */; };
 		04D8B52C1CA0803B9DC4FC5F /* Theme.swift in Sources */ = {isa = PBXBuildFile; fileRef = FCE05B35822511844B1D8811 /* Theme.swift */; };
 		06DD21EE0B64E9D981B8BDA7 /* APIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 113D94811C3DA9F62DDE40A2 /* APIClient.swift */; };
 		2A4894D657134FA56303ED02 /* User.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0E32E29C1CF19765FB43C85E /* User.swift */; };
@@ -30,9 +31,12 @@
 		D3E4F5061728394A5B6C7D80 /* BotManagementView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4F506172839405B6C7D8E90 /* BotManagementView.swift */; };
 		F5061728394A5B6C7D8E9FA0 /* BotRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 06172839405B6C7D8E9FA0B1 /* BotRow.swift */; };
 		17283940506B7C8D9EAFB0C1 /* CreateBotSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 28394050617C8D9EAFB0C1D2 /* CreateBotSheet.swift */; };
+		A1B2C3D4E5F6071829305001 /* DocumentPickerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F6071829305002 /* DocumentPickerView.swift */; };
+		A1B2C3D4E5F6071829305003 /* TypingDotsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F6071829305004 /* TypingDotsView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		DDDD4444EEEE5555FFFF6666 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		0E32E29C1CF19765FB43C85E /* User.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = User.swift; sourceTree = "<group>"; };
 		102FE39B5900D334F3FE1A05 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		113D94811C3DA9F62DDE40A2 /* APIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APIClient.swift; sourceTree = "<group>"; };
@@ -58,6 +62,8 @@
 		E4F506172839405B6C7D8E90 /* BotManagementView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BotManagementView.swift; sourceTree = "<group>"; };
 		06172839405B6C7D8E9FA0B1 /* BotRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BotRow.swift; sourceTree = "<group>"; };
 		28394050617C8D9EAFB0C1D2 /* CreateBotSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CreateBotSheet.swift; sourceTree = "<group>"; };
+		A1B2C3D4E5F6071829305002 /* DocumentPickerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DocumentPickerView.swift; sourceTree = "<group>"; };
+		A1B2C3D4E5F6071829305004 /* TypingDotsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TypingDotsView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXGroup section */
@@ -86,7 +92,9 @@
 			isa = PBXGroup;
 			children = (
 				8412F966148EBC356A606638 /* AvatarView.swift */,
+				A1B2C3D4E5F6071829305002 /* DocumentPickerView.swift */,
 				8687B83162D5DB5EF384BD88 /* MessageBubble.swift */,
+				A1B2C3D4E5F6071829305004 /* TypingDotsView.swift */,
 			);
 			path = Components;
 			sourceTree = "<group>";
@@ -94,6 +102,7 @@
 		7B85BC17309558293092ADE1 /* CatsCompany */ = {
 			isa = PBXGroup;
 			children = (
+				DDDD4444EEEE5555FFFF6666 /* Assets.xcassets */,
 				102FE39B5900D334F3FE1A05 /* Info.plist */,
 				DA06DCEC1A11B6C037BC7FA5 /* App */,
 				6ABD8A32223293875F1BFD72 /* Components */,
@@ -212,6 +221,7 @@
 			buildConfigurationList = CC90DF62D43BFF2A08E59B6E /* Build configuration list for PBXNativeTarget "CatsCompany" */;
 			buildPhases = (
 				F8907FE9F27B9A3DBEF645E4 /* Sources */,
+				RRRR1111SSSS2222TTTT3333 /* Resources */,
 			);
 			buildRules = (
 			);
@@ -251,6 +261,17 @@
 		};
 /* End PBXProject section */
 
+/* Begin PBXResourcesBuildPhase section */
+		RRRR1111SSSS2222TTTT3333 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				AAAA1111BBBB2222CCCC3333 /* Assets.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
 /* Begin PBXSourcesBuildPhase section */
 		F8907FE9F27B9A3DBEF645E4 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
@@ -268,6 +289,7 @@
 				DFBE06B673260C17FB4E2826 /* ChatListView.swift in Sources */,
 				619B0B2D519E69E55FE0DF54 /* ContactsView.swift in Sources */,
 				17283940506B7C8D9EAFB0C1 /* CreateBotSheet.swift in Sources */,
+				A1B2C3D4E5F6071829305001 /* DocumentPickerView.swift in Sources */,
 				ECEE79854F74F3230EF127D4 /* CreateGroupView.swift in Sources */,
 				741472AF57CFD4451286F964 /* Group.swift in Sources */,
 				DE7172395BB1A8DBA784E4B2 /* LoginView.swift in Sources */,
@@ -276,6 +298,7 @@
 				9A1B2C3D4E5F60718293A4B5 /* MessageStore.swift in Sources */,
 				C3B860427B8DA1F6975990F1 /* ProfileView.swift in Sources */,
 				04D8B52C1CA0803B9DC4FC5F /* Theme.swift in Sources */,
+				A1B2C3D4E5F6071829305003 /* TypingDotsView.swift in Sources */,
 				2A4894D657134FA56303ED02 /* User.swift in Sources */,
 				4AD319BC122B153966DE4E00 /* WSMessage.swift in Sources */,
 				5D9049591D81D23DF0A57E83 /* WebSocketManager.swift in Sources */,
