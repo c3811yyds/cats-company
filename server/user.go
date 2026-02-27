@@ -128,6 +128,29 @@ func (h *UserHandler) HandleLogin(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// HandleMe handles GET /api/me — returns the authenticated user's profile.
+func (h *UserHandler) HandleMe(w http.ResponseWriter, r *http.Request) {
+	uid := UIDFromContext(r.Context())
+	if uid == 0 {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+		return
+	}
+
+	user, err := h.db.GetUser(uid)
+	if err != nil || user == nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "user not found"})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"uid":          user.ID,
+		"username":     user.Username,
+		"display_name": user.DisplayName,
+		"account_type": user.AccountType,
+		"created_at":   user.CreatedAt,
+	})
+}
+
 // autoAddAssistantFriend adds the default AI assistant as a friend for new users.
 func autoAddAssistantFriend(db *mysql.Adapter, uid int64) {
 	assistant, _ := db.GetUserByUsername("ai_assistant")

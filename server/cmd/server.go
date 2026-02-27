@@ -95,6 +95,9 @@ func main() {
 	// User search
 	mux.HandleFunc("/api/users/search", friendHandler.HandleSearchUsers)
 
+	// User profile (require auth — JWT or API Key)
+	mux.HandleFunc("/api/me", authWithDB(userHandler.HandleMe))
+
 	// Messages (require auth) — kept for REST fallback
 	mux.HandleFunc("/api/messages/send", server.AuthMiddleware(msgHandler.HandleSendMessage))
 	mux.HandleFunc("/api/messages", server.AuthMiddleware(msgHandler.HandleGetMessages))
