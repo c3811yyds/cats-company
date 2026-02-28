@@ -49,6 +49,9 @@ struct ChatListView: View {
             }
             .task { await loadConversations() }
             .onAppear { setupWSHandlers() }
+            .onReceive(NotificationCenter.default.publisher(for: .botDeleted)) { _ in
+                Task { await loadConversations() }
+            }
         }
     }
 

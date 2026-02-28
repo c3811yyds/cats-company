@@ -108,6 +108,9 @@ struct ContactsView: View {
             }
             .refreshable { await loadData() }
             .task { await loadData() }
+            .onReceive(NotificationCenter.default.publisher(for: .botDeleted)) { _ in
+                Task { await loadData() }
+            }
         }
     }
 

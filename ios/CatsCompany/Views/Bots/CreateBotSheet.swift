@@ -58,62 +58,60 @@ struct CreateBotSheet: View {
 
     // MARK: - Create Form
 
+    @ViewBuilder
     private var createSection: some View {
-        Group {
-            Section {
-                TextField("机器人名称", text: $displayName)
-                    .textInputAutocapitalization(.never)
-            } header: {
-                Text("基本信息")
-            } footer: {
-                Text("名称将作为机器人的显示名，用户名会自动生成")
-            }
+        Section {
+            TextField("机器人名称", text: $displayName)
+                .textInputAutocapitalization(.never)
+        } header: {
+            Text("基本信息")
+        } footer: {
+            Text("名称将作为机器人的显示名，用户名会自动生成")
+        }
 
-            if let err = errorMessage {
-                Section {
-                    Text(err)
-                        .foregroundStyle(CatColor.danger)
-                        .font(.caption)
-                }
+        if let err = errorMessage {
+            Section {
+                Text(err)
+                    .foregroundStyle(CatColor.danger)
+                    .font(.caption)
             }
         }
     }
 
     // MARK: - Success View
 
+    @ViewBuilder
     private func successSection(_ bot: APIClient.CreateBotResponse) -> some View {
-        Group {
+        Section {
+            LabeledContent("名称", value: bot.displayName ?? bot.username)
+            LabeledContent("用户名", value: "@\(bot.username)")
+            LabeledContent("UID", value: "\(bot.uid)")
+        } header: {
+            Text("机器人信息")
+        }
+
+        if let key = createdApiKey {
             Section {
-                LabeledContent("名称", value: bot.displayName ?? bot.username)
-                LabeledContent("用户名", value: "@\(bot.username)")
-                LabeledContent("UID", value: "\(bot.uid)")
+                copiableRow(label: "API Key", value: key, field: "apiKey")
+                copiableRow(label: "WebSocket", value: wsUrl, field: "wsUrl")
             } header: {
-                Text("机器人信息")
+                Text("连接凭证")
+            } footer: {
+                Text("API Key 仅在创建时显示一次，请妥善保存。")
+                    .foregroundStyle(CatColor.danger)
             }
+        }
 
-            if let key = createdApiKey {
-                Section {
-                    copiableRow(label: "API Key", value: key, field: "apiKey")
-                    copiableRow(label: "WebSocket", value: wsUrl, field: "wsUrl")
-                } header: {
-                    Text("连接凭证")
-                } footer: {
-                    Text("API Key 仅在创建时显示一次，请妥善保存。")
-                        .foregroundStyle(CatColor.danger)
+        if let status = friendStatus {
+            Section {
+                HStack {
+                    Image(systemName: friendSuccess ? "checkmark.circle.fill" : "exclamationmark.circle.fill")
+                        .foregroundStyle(friendSuccess ? .green : .orange)
+                    Text(status)
+                        .font(.caption)
                 }
-            }
-
-            if let status = friendStatus {
-                Section {
-                    HStack {
-                        Image(systemName: friendSuccess ? "checkmark.circle.fill" : "exclamationmark.circle.fill")
-                            .foregroundStyle(friendSuccess ? .green : .orange)
-                        Text(status)
-                            .font(.caption)
-                    }
-                } header: {
-                    Text("好友状态")
-                }
+            } header: {
+                Text("好友状态")
             }
         }
     }

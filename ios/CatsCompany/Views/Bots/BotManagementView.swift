@@ -1,5 +1,10 @@
 import SwiftUI
 
+// Notification sent when a bot is deleted
+extension Notification.Name {
+    static let botDeleted = Notification.Name("botDeleted")
+}
+
 struct BotManagementView: View {
     @State private var bots: [Bot] = []
     @State private var isLoading = true
@@ -80,6 +85,8 @@ struct BotManagementView: View {
         do {
             _ = try await APIClient.shared.deleteBot(uid: bot.id)
             bots.removeAll { $0.id == bot.id }
+            // Notify other views to refresh (friends list, chats list)
+            NotificationCenter.default.post(name: .botDeleted, object: bot.id)
         } catch {
             errorMessage = "删除失败: \(error.localizedDescription)"
         }

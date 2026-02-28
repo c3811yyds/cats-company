@@ -192,7 +192,7 @@ func (a *Adapter) GetBotOwner(botUID int64) (int64, error) {
 	return ownerID, nil
 }
 
-// DeleteBot removes a bot's config and disables the user account.
+// DeleteBot removes a bot's config, disables the user account, and removes all friend relationships.
 func (a *Adapter) DeleteBot(botUID int64) error {
 	tx, err := a.db.Begin()
 	if err != nil {
@@ -200,6 +200,13 @@ func (a *Adapter) DeleteBot(botUID int64) error {
 	}
 	defer tx.Rollback()
 
+	// Delete all friend relationships involving this bot (both directions)
+	if _, err := tx.Exec(
+		`DELETE FROM friends WHERE from_user_id = ? OR to_user_id = ?`,
+		botUID, botUID,
+	); err != nil {
+		return fmt.Errorf("delete bot friends: %w", err)
+	}
 	// Delete bot config
 	if _, err := tx.Exec(`DELETE FROM bot_config WHERE user_id = ?`, botUID); err != nil {
 		return fmt.Errorf("delete bot config: %w", err)
