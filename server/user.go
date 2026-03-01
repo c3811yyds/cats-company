@@ -86,12 +86,20 @@ func (h *UserHandler) HandleRegister(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	token, err := GenerateToken(uid, req.Username)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "token generation failed"})
+		return
+	}
+
 	// Auto-add default AI assistant as friend
 	autoAddAssistantFriend(h.db, uid)
 
 	writeJSON(w, http.StatusCreated, map[string]interface{}{
-		"uid":      uid,
-		"username": req.Username,
+		"token":        token,
+		"uid":          uid,
+		"username":     req.Username,
+		"display_name": displayName,
 	})
 }
 
@@ -159,4 +167,3 @@ func autoAddAssistantFriend(db *mysql.Adapter, uid int64) {
 		db.AcceptFriendRequest(assistant.ID, uid)
 	}
 }
-
