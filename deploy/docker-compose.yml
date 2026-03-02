@@ -2,6 +2,7 @@ services:
   mysql:
     image: mysql:8.0
     container_name: catscompany-mysql
+    restart: unless-stopped
     environment:
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-changeme}
       MYSQL_DATABASE: openchat
@@ -29,6 +30,7 @@ services:
       args:
         GOPROXY: "${GOPROXY:-https://proxy.golang.org,direct}"
     container_name: catscompany-server
+    restart: unless-stopped
     ports:
       - "6061:6061"
       - "6062:6062"
@@ -53,6 +55,7 @@ services:
       context: ..
       dockerfile: deploy/Dockerfile.webapp
     container_name: catscompany-webapp
+    restart: unless-stopped
     ports:
       - "3001:3000"
     environment:
@@ -63,6 +66,7 @@ services:
       context: ..
       dockerfile: deploy/Dockerfile.assistant
     container_name: catscompany-assistant
+    restart: unless-stopped
     depends_on:
       - server
     environment:
@@ -78,6 +82,7 @@ services:
       context: ..
       dockerfile: deploy/Dockerfile.xiaoba-ts
     container_name: catscompany-xiaoba-ts
+    restart: unless-stopped
     depends_on:
       - server
     environment:
@@ -91,6 +96,7 @@ services:
   nginx:
     image: nginx:alpine
     container_name: catscompany-nginx
+    restart: unless-stopped
     ports:
       - "80:80"
       - "8081:80"

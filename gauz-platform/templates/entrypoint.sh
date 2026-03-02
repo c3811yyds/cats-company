@@ -1,7 +1,24 @@
 #!/bin/sh
 set -e
 
+ensure_link() {
+  src="$1"
+  dst="$2"
+
+  mkdir -p "$src"
+  if [ -L "$dst" ] || [ -e "$dst" ]; then
+    rm -rf "$dst"
+  fi
+  ln -s "$src" "$dst"
+}
+
 echo "[entrypoint] Starting XiaoBa tenant container..."
+
+# Persist XiaoBa runtime outputs that are written relative to /app.
+ensure_link /data/logs /app/logs
+ensure_link /data/files /app/files
+ensure_link /data/workspace /app/workspace
+ensure_link /data/runtime-data /app/data
 
 if [ ! -f "/app/package.json" ] && [ ! -d "/app/.git" ] && [ -n "${GIT_REPO_URL}" ]; then
   if command -v git >/dev/null 2>&1; then
