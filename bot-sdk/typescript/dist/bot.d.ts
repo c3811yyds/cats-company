@@ -1,6 +1,7 @@
 import type { CatsBotConfig, BotEventMap, MsgServerData, MessageContent, RichContentLinkPreview, RichContentCard, UploadResult } from './types';
 export declare class CatsBot {
     uid: string;
+    name: string;
     private readonly config;
     private readonly emitter;
     private readonly uploader;

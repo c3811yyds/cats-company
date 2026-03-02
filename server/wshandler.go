@@ -201,14 +201,19 @@ func (h *Hub) handleMessage(uid int64, msg *ClientMessage) {
 	case msg.Note != nil:
 		h.handleNote(uid, msg.Note)
 	case msg.Hi != nil:
-		h.handleHi(uid, msg.Hi)
+		usr, _ := h.db.GetUser(uid)
+		var displayName string
+		if usr != nil {
+			displayName = usr.DisplayName
+		}
+		h.handleHi(uid, displayName, msg.Hi)
 	case msg.Get != nil:
 		h.handleGet(uid, msg.Get)
 	}
 }
 
 // handleHi responds to the handshake message.
-func (h *Hub) handleHi(uid int64, msg *MsgClientHi) {
+func (h *Hub) handleHi(uid int64, displayName string, msg *MsgClientHi) {
 	h.SendToUser(uid, &ServerMessage{
 		Ctrl: &MsgServerCtrl{
 			ID:   msg.ID,
@@ -218,6 +223,7 @@ func (h *Hub) handleHi(uid int64, msg *MsgClientHi) {
 				"ver":    "0.1.0",
 				"build":  "catscompany",
 				"uid":    formatUID(uid),
+				"name":   displayName,
 			},
 		},
 	})

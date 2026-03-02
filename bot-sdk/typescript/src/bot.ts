@@ -28,6 +28,7 @@ interface PendingAck {
 
 export class CatsBot {
   public uid = '';
+  public name = '';
 
   private readonly config: Required<CatsBotConfig>;
   private readonly emitter = new EventEmitter();
@@ -307,11 +308,12 @@ export class CatsBot {
 
   private doConnect(): Promise<void> {
     return new Promise<void>((resolve, reject) => {
-      const url = `${this.config.serverUrl}?api_key=${this.config.apiKey}`;
       let handshakeDone = false;
 
       try {
-        this.ws = new WebSocket(url);
+        this.ws = new WebSocket(this.config.serverUrl, {
+          headers: { 'X-API-Key': this.config.apiKey },
+        });
       } catch (err: any) {
         reject(new ConnectionError(`Failed to create WebSocket: ${err.message}`));
         return;
@@ -350,8 +352,9 @@ export class CatsBot {
             handshakeDone = true;
             clearTimeout(handshakeTimeout);
             this.uid = String((msg.ctrl.params as any)?.uid ?? '');
+            this.name = String((msg.ctrl.params as any)?.name ?? '');
             this.reconnectAttempt = 0;
-            this.emit('ready', this.uid);
+            this.emit('ready', this.uid, this.name);
             resolve();
             return;
           } else {

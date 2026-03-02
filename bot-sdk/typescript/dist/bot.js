@@ -12,6 +12,7 @@ const context_1 = require("./context");
 const uploader_1 = require("./uploader");
 class CatsBot {
     uid = '';
+    name = '';
     config;
     emitter = new events_1.EventEmitter();
     uploader;
@@ -245,10 +246,11 @@ class CatsBot {
     }
     doConnect() {
         return new Promise((resolve, reject) => {
-            const url = `${this.config.serverUrl}?api_key=${this.config.apiKey}`;
             let handshakeDone = false;
             try {
-                this.ws = new ws_1.default(url);
+                this.ws = new ws_1.default(this.config.serverUrl, {
+                    headers: { 'X-API-Key': this.config.apiKey },
+                });
             }
             catch (err) {
                 reject(new errors_1.ConnectionError(`Failed to create WebSocket: ${err.message}`));
@@ -282,8 +284,9 @@ class CatsBot {
                         handshakeDone = true;
                         clearTimeout(handshakeTimeout);
                         this.uid = String(msg.ctrl.params?.uid ?? '');
+                        this.name = String(msg.ctrl.params?.name ?? '');
                         this.reconnectAttempt = 0;
-                        this.emit('ready', this.uid);
+                        this.emit('ready', this.uid, this.name);
                         resolve();
                         return;
                     }

@@ -216,7 +216,7 @@ export interface CatsBotConfig {
 import type { MessageContext } from './context';
 
 export interface BotEventMap {
-  ready: (uid: string) => void;
+  ready: (uid: string, name: string) => void;
   message: (ctx: MessageContext) => void;
   presence: (pres: MsgServerPres) => void;
   typing: (info: MsgServerInfo) => void;
