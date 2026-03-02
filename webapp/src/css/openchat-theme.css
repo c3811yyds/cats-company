@@ -1020,6 +1020,11 @@ body {
   border-bottom: 1px solid #ffc107;
 }
 
+.oc-api-key-banner.managed {
+  background: #eef9f2;
+  border-bottom-color: rgba(7, 193, 96, 0.25);
+}
+
 .oc-api-key-label {
   font-size: 13px;
   font-weight: 500;
@@ -1097,6 +1102,21 @@ body {
   color: var(--oc-green-dark);
 }
 
+.oc-bot-badge.status.running {
+  background: rgba(7, 193, 96, 0.12);
+  color: var(--oc-green-dark);
+}
+
+.oc-bot-badge.status.warning {
+  background: #fff6d8;
+  color: #7a5c00;
+}
+
+.oc-bot-badge.status.muted {
+  background: #f1f1f1;
+  color: var(--oc-text-secondary);
+}
+
 .oc-bot-details {
   display: flex;
   flex-direction: column;
@@ -1115,9 +1135,32 @@ body {
   color: var(--oc-text-secondary);
 }
 
+.oc-bot-detail-row.multi-line {
+  align-items: flex-start;
+}
+
 .oc-bot-detail-row strong,
 .oc-bot-detail-row code {
   color: var(--oc-text);
+}
+
+.oc-bot-detail-row.multi-line strong {
+  text-align: right;
+  max-width: 60%;
+  line-height: 1.4;
+  word-break: break-word;
+}
+
+.oc-deploy-status.running {
+  color: var(--oc-green-dark);
+}
+
+.oc-deploy-status.warning {
+  color: #7a5c00;
+}
+
+.oc-deploy-status.muted {
+  color: var(--oc-text-secondary);
 }
 
 .oc-bot-inline-note {
@@ -1185,6 +1228,61 @@ body {
 .oc-mode-option.active {
   border-color: var(--oc-green);
   background: rgba(7, 193, 96, 0.08);
+}
+
+.oc-managed-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.oc-managed-progress-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--oc-text);
+}
+
+.oc-managed-progress-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.oc-managed-progress-step {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 12px;
+  color: var(--oc-text-secondary);
+}
+
+.oc-managed-progress-step.active {
+  color: var(--oc-green-dark);
+  font-weight: 600;
+}
+
+.oc-managed-progress-step.done {
+  color: var(--oc-text);
+}
+
+.oc-managed-progress-dot {
+  width: 22px;
+  height: 22px;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: #f1f1f1;
+  color: var(--oc-text-secondary);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.oc-managed-progress-step.active .oc-managed-progress-dot,
+.oc-managed-progress-step.done .oc-managed-progress-dot {
+  background: rgba(7, 193, 96, 0.12);
+  color: var(--oc-green-dark);
 }
 
 /* Modal styles */

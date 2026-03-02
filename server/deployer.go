@@ -54,6 +54,39 @@ func (d *Deployer) Deploy(ctx context.Context, tenant, apiKey string) error {
 	return nil
 }
 
+// Status calls GET /api/deploy/{tenant}/status on gauz-platform and returns the runtime state.
+func (d *Deployer) Status(ctx context.Context, tenant, apiKey string) (string, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet,
+		d.baseURL+"/api/deploy/"+tenant+"/status", nil)
+	if err != nil {
+		return "", fmt.Errorf("status request build: %w", err)
+	}
+	if apiKey != "" {
+		req.Header.Set("Authorization", "ApiKey "+apiKey)
+	}
+
+	resp, err := d.client.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("status request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 300 {
+		return "", fmt.Errorf("status returned %d", resp.StatusCode)
+	}
+
+	var payload struct {
+		Status string `json:"status"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		return "", fmt.Errorf("status decode failed: %w", err)
+	}
+	if payload.Status == "" {
+		return "", fmt.Errorf("status missing in deploy response")
+	}
+	return payload.Status, nil
+}
+
 // Remove calls DELETE /api/deploy/{tenant} on gauz-platform to tear down the container.
 // Failures are logged but do not block the caller.
 func (d *Deployer) Remove(ctx context.Context, tenant, apiKey string) error {

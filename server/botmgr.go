@@ -2,6 +2,7 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -222,6 +223,26 @@ type createBotResult struct {
 	APIKey   string
 }
 
+func (h *BotHandler) deploymentStatus(ctx context.Context, botUID int64, tenantName string) (string, string) {
+	if tenantName == "" || h.deployer == nil {
+		return "", ""
+	}
+
+	apiKey, err := h.db.GetBotAPIKey(botUID)
+	if err != nil {
+		return "unknown", fmt.Sprintf("failed to load bot api key: %v", err)
+	}
+	if apiKey == "" {
+		return "unknown", "missing bot api key"
+	}
+
+	status, err := h.deployer.Status(ctx, tenantName, apiKey)
+	if err != nil {
+		return "unknown", err.Error()
+	}
+	return status, ""
+}
+
 // createBotAccount is the shared logic for creating a bot account with owner.
 func (h *BotHandler) createBotAccount(ownerUID int64, req BotRegisterRequest) (*createBotResult, int, error) {
 	if len(req.Username) < 3 {
@@ -358,13 +379,31 @@ func (h *BotHandler) HandleDeployBot(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	friendAutoAdded := false
+	if _, err := h.db.CreateFriendRequest(ownerUID, result.UID, ""); err != nil {
+		log.Printf("[deploy] failed to create auto-friend request for uid %d: %v", result.UID, err)
+	} else if err := h.db.AcceptFriendRequest(ownerUID, result.UID); err != nil {
+		log.Printf("[deploy] failed to auto-accept friend request for uid %d: %v", result.UID, err)
+	} else {
+		friendAutoAdded = true
+	}
+
+	deploymentStatus, deploymentError := h.deploymentStatus(r.Context(), result.UID, tenantName)
+	if deploymentStatus == "" {
+		deploymentStatus = "running"
+	}
+
 	resp := map[string]interface{}{
-		"uid":         result.UID,
-		"username":    result.Username,
-		"type":        "bot",
-		"owner_id":    ownerUID,
-		"api_key":     result.APIKey,
-		"tenant_name": tenantName,
+		"uid":               result.UID,
+		"username":          result.Username,
+		"type":              "bot",
+		"owner_id":          ownerUID,
+		"tenant_name":       tenantName,
+		"deployment_status": deploymentStatus,
+		"friend_auto_added": friendAutoAdded,
+	}
+	if deploymentError != "" {
+		resp["deployment_error"] = deploymentError
 	}
 	writeJSON(w, http.StatusCreated, resp)
 }
@@ -389,6 +428,24 @@ func (h *BotHandler) HandleListMyBots(w http.ResponseWriter, r *http.Request) {
 	}
 	if bots == nil {
 		bots = []map[string]interface{}{}
+	}
+	for _, bot := range bots {
+		tenantName, _ := bot["tenant_name"].(string)
+		if tenantName == "" {
+			continue
+		}
+		botUID, ok := bot["id"].(int64)
+		if !ok {
+			continue
+		}
+		status, deployErr := h.deploymentStatus(r.Context(), botUID, tenantName)
+		if status == "" {
+			status = "unknown"
+		}
+		bot["deployment_status"] = status
+		if deployErr != "" {
+			bot["deployment_error"] = deployErr
+		}
 	}
 	writeJSON(w, http.StatusOK, map[string]interface{}{"bots": bots})
 }
