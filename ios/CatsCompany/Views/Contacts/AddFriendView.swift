@@ -35,7 +35,7 @@ struct AddFriendView: View {
                 } else {
                     List(results) { user in
                         HStack(spacing: 12) {
-                            AvatarView(name: user.label, isBot: user.isBot, isGroup: false, size: 40)
+                            AvatarView(name: user.label, avatarURL: user.avatarUrl, isBot: user.isBot, isGroup: false, size: 40)
                             VStack(alignment: .leading) {
                                 Text(user.label)
                                 Text("@\(user.username)")

@@ -3,6 +3,7 @@ import SwiftUI
 struct ProfileView: View {
     @ObservedObject var auth = AuthManager.shared
     @ObservedObject var ws = WebSocketManager.shared
+    @State private var showEditProfile = false
 
     var body: some View {
         NavigationStack {
@@ -12,6 +13,7 @@ struct ProfileView: View {
                     HStack(spacing: 16) {
                         AvatarView(
                             name: auth.currentUser?.label ?? "?",
+                            avatarURL: auth.currentUser?.avatarUrl,
                             isBot: false,
                             isGroup: false,
                             size: 64
@@ -34,6 +36,25 @@ struct ProfileView: View {
                         Spacer()
                     }
                     .padding(16)
+                    .background(CatColor.cardBg)
+                    .clipShape(RoundedRectangle(cornerRadius: CatLayout.radius))
+
+                    Button {
+                        showEditProfile = true
+                    } label: {
+                        HStack {
+                            Image(systemName: "pencil")
+                                .foregroundStyle(CatColor.primary)
+                            Text("编辑个人资料")
+                            Spacer()
+                            Image(systemName: "chevron.right")
+                                .font(.caption)
+                                .foregroundStyle(CatColor.textSecondary)
+                        }
+                        .foregroundStyle(CatColor.textPrimary)
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 14)
+                    }
                     .background(CatColor.cardBg)
                     .clipShape(RoundedRectangle(cornerRadius: CatLayout.radius))
 
@@ -87,6 +108,7 @@ struct ProfileView: View {
                     // Clear cache button
                     Button {
                         MessageStore.shared.clearAllMessages()
+                        NotificationCenter.default.post(name: .conversationListChanged, object: nil)
                     } label: {
                         HStack {
                             Image(systemName: "arrow.triangle.2.circlepath")
@@ -122,6 +144,21 @@ struct ProfileView: View {
             }
             .background(CatColor.background)
             .navigationTitle("我")
+            .task { await refreshProfile() }
+            .sheet(isPresented: $showEditProfile) {
+                ProfileEditorView {
+                    await refreshProfile()
+                }
+            }
+        }
+    }
+
+    private func refreshProfile() async {
+        do {
+            let me = try await APIClient.shared.getMe()
+            auth.updateCurrentUser(me)
+        } catch {
+            print("Refresh profile error: \(error)")
         }
     }
 }

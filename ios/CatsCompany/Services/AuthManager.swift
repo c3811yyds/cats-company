@@ -33,6 +33,15 @@ class AuthManager: ObservableObject {
         if let data = try? JSONEncoder().encode(user) {
             UserDefaults.standard.set(data, forKey: userKey)
         }
+        IdentityStore.shared.upsertCurrentUser(user)
+    }
+
+    func updateCurrentUser(_ user: User) {
+        self.currentUser = user
+        if let data = try? JSONEncoder().encode(user) {
+            UserDefaults.standard.set(data, forKey: userKey)
+        }
+        IdentityStore.shared.upsertCurrentUser(user)
     }
 
     func logout() {
@@ -41,5 +50,6 @@ class AuthManager: ObservableObject {
         self.isLoggedIn = false
         UserDefaults.standard.removeObject(forKey: tokenKey)
         UserDefaults.standard.removeObject(forKey: userKey)
+        IdentityStore.shared.clear()
     }
 }

@@ -27,7 +27,7 @@ struct CreateGroupView: View {
                             }
                         } label: {
                             HStack {
-                                AvatarView(name: friend.label, isBot: friend.isBot, isGroup: false, size: 32)
+                                AvatarView(name: friend.label, avatarURL: friend.avatarUrl, isBot: friend.isBot, isGroup: false, size: 32)
                                 Text(friend.label)
                                     .foregroundStyle(.primary)
                                 Spacer()

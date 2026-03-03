@@ -25,7 +25,7 @@ var upgrader = websocket.Upgrader{
 // Hub maintains the set of active clients and broadcasts messages.
 type Hub struct {
 	mu          sync.RWMutex
-	clients     map[int64]*Client
+	clients     map[int64]map[*Client]struct{}
 	register    chan *Client
 	unregister  chan *Client
 	db          *mysql.Adapter
@@ -41,12 +41,14 @@ type Client struct {
 	uid         int64
 	accountType types.AccountType
 	send        chan []byte
+	sendMu      sync.RWMutex
+	sendClosed  bool
 }
 
 // NewHub creates a new Hub.
 func NewHub(db *mysql.Adapter, rl *RateLimiter) *Hub {
 	return &Hub{
-		clients:     make(map[int64]*Client),
+		clients:     make(map[int64]map[*Client]struct{}),
 		register:    make(chan *Client),
 		unregister:  make(chan *Client),
 		db:          db,
@@ -66,26 +68,22 @@ func (h *Hub) Run() {
 	for {
 		select {
 		case client := <-h.register:
-			h.mu.Lock()
-			// Close existing connection for same user (single-device for now)
-			if old, ok := h.clients[client.uid]; ok {
-				close(old.send)
-				old.conn.Close()
+			firstConn, deviceCount, onlineUsers := h.addClient(client)
+			log.Printf("client connected: uid=%d (devices: %d, online users: %d)", client.uid, deviceCount, onlineUsers)
+			if firstConn {
+				h.broadcastPresence(client.uid, "on")
 			}
-			h.clients[client.uid] = client
-			h.mu.Unlock()
-			log.Printf("client connected: uid=%d (online: %d)", client.uid, h.OnlineCount())
-			h.broadcastPresence(client.uid, "on")
 
 		case client := <-h.unregister:
-			h.mu.Lock()
-			if cur, ok := h.clients[client.uid]; ok && cur == client {
-				delete(h.clients, client.uid)
-				close(client.send)
+			removed, lastConn, remaining, onlineUsers := h.removeClient(client)
+			if !removed {
+				continue
 			}
-			h.mu.Unlock()
-			log.Printf("client disconnected: uid=%d (online: %d)", client.uid, h.OnlineCount())
-			h.broadcastPresence(client.uid, "off")
+			client.closeSend()
+			log.Printf("client disconnected: uid=%d (devices: %d, online users: %d)", client.uid, remaining, onlineUsers)
+			if lastConn {
+				h.broadcastPresence(client.uid, "off")
+			}
 		}
 	}
 }
@@ -106,6 +104,44 @@ func (h *Hub) GetOnlineUIDs() []int64 {
 		uids = append(uids, uid)
 	}
 	return uids
+}
+
+func (h *Hub) addClient(client *Client) (firstConn bool, deviceCount int, onlineUsers int) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	clients := h.clients[client.uid]
+	firstConn = len(clients) == 0
+	if clients == nil {
+		clients = make(map[*Client]struct{})
+		h.clients[client.uid] = clients
+	}
+	clients[client] = struct{}{}
+
+	return firstConn, len(clients), len(h.clients)
+}
+
+func (h *Hub) removeClient(client *Client) (removed bool, lastConn bool, remaining int, onlineUsers int) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	clients, ok := h.clients[client.uid]
+	if !ok {
+		return false, false, 0, len(h.clients)
+	}
+	if _, ok := clients[client]; !ok {
+		return false, false, len(clients), len(h.clients)
+	}
+
+	delete(clients, client)
+	removed = true
+	remaining = len(clients)
+	if remaining == 0 {
+		delete(h.clients, client.uid)
+		lastConn = true
+	}
+
+	return removed, lastConn, remaining, len(h.clients)
 }
 
 // broadcastPresence notifies all friends of a user's online/offline status.
@@ -192,54 +228,51 @@ func ServeWS(hub *Hub, w http.ResponseWriter, r *http.Request) {
 }
 
 // handleMessage dispatches incoming client messages.
-func (h *Hub) handleMessage(uid int64, msg *ClientMessage) {
+func (h *Hub) handleMessage(client *Client, msg *ClientMessage) {
 	switch {
 	case msg.Pub != nil:
-		h.handlePub(uid, msg.Pub)
+		h.handlePub(client, msg.Pub)
 	case msg.Sub != nil:
-		h.handleSub(uid, msg.Sub)
+		h.handleSub(client, msg.Sub)
 	case msg.Note != nil:
-		h.handleNote(uid, msg.Note)
+		h.handleNote(client, msg.Note)
 	case msg.Hi != nil:
-		usr, _ := h.db.GetUser(uid)
+		usr, _ := h.db.GetUser(client.uid)
 		var displayName string
 		if usr != nil {
 			displayName = usr.DisplayName
 		}
-		h.handleHi(uid, displayName, msg.Hi)
+		h.handleHi(client, displayName, msg.Hi)
 	case msg.Get != nil:
-		h.handleGet(uid, msg.Get)
+		h.handleGet(client, msg.Get)
 	}
 }
 
 // handleHi responds to the handshake message.
-func (h *Hub) handleHi(uid int64, displayName string, msg *MsgClientHi) {
-	h.SendToUser(uid, &ServerMessage{
+func (h *Hub) handleHi(client *Client, displayName string, msg *MsgClientHi) {
+	h.SendToClient(client, &ServerMessage{
 		Ctrl: &MsgServerCtrl{
 			ID:   msg.ID,
 			Code: 200,
 			Text: "ok",
 			Params: map[string]interface{}{
-				"ver":    "0.1.0",
-				"build":  "catscompany",
-				"uid":    formatUID(uid),
-				"name":   displayName,
+				"ver":   "0.1.0",
+				"build": "catscompany",
+				"uid":   formatUID(client.uid),
+				"name":  displayName,
 			},
 		},
 	})
 }
 
 // handlePub handles a publish (send message) request.
-func (h *Hub) handlePub(uid int64, msg *MsgClientPub) {
+func (h *Hub) handlePub(client *Client, msg *MsgClientPub) {
+	uid := client.uid
+
 	// Rate limit check
 	if h.rateLimiter != nil {
-		client := h.getClient(uid)
-		acctType := types.AccountHuman
-		if client != nil {
-			acctType = client.accountType
-		}
-		if !h.rateLimiter.Allow(uid, acctType) {
-			h.SendToUser(uid, &ServerMessage{
+		if !h.rateLimiter.Allow(uid, client.accountType) {
+			h.SendToClient(client, &ServerMessage{
 				Ctrl: &MsgServerCtrl{ID: msg.ID, Code: 429, Text: "rate limit exceeded"},
 			})
 			return
@@ -266,7 +299,7 @@ func (h *Hub) handlePub(uid int64, msg *MsgClientPub) {
 		content = string(contentBytes)
 	}
 	if content == "" {
-		h.SendToUser(uid, &ServerMessage{
+		h.SendToClient(client, &ServerMessage{
 			Ctrl: &MsgServerCtrl{ID: msg.ID, Code: 400, Text: "empty content"},
 		})
 		return
@@ -274,7 +307,7 @@ func (h *Hub) handlePub(uid int64, msg *MsgClientPub) {
 
 	// Route based on topic type
 	if isGroupTopic(topic) {
-		h.handleGroupPub(uid, msg, topic, content, msgType)
+		h.handleGroupPub(client, msg, topic, content, msgType)
 		return
 	}
 
@@ -283,7 +316,7 @@ func (h *Hub) handlePub(uid int64, msg *MsgClientPub) {
 	// Bot-to-Bot loop protection
 	peerUID := extractPeerUID(topic, uid)
 	if peerUID > 0 && !h.checkBotToBot(uid, peerUID) {
-		h.SendToUser(uid, &ServerMessage{
+		h.SendToClient(client, &ServerMessage{
 			Ctrl: &MsgServerCtrl{ID: msg.ID, Code: 429, Text: "bot-to-bot conversation limit reached"},
 		})
 		return
@@ -302,14 +335,14 @@ func (h *Hub) handlePub(uid int64, msg *MsgClientPub) {
 	}
 	if err != nil {
 		log.Printf("save message error: %v", err)
-		h.SendToUser(uid, &ServerMessage{
+		h.SendToClient(client, &ServerMessage{
 			Ctrl: &MsgServerCtrl{ID: msg.ID, Code: 500, Text: "save failed"},
 		})
 		return
 	}
 
 	// Confirm to sender
-	h.SendToUser(uid, &ServerMessage{
+	h.SendToClient(client, &ServerMessage{
 		Ctrl: &MsgServerCtrl{
 			ID:    msg.ID,
 			Topic: topic,
@@ -322,7 +355,7 @@ func (h *Hub) handlePub(uid int64, msg *MsgClientPub) {
 	})
 
 	// Track bot stats
-	if client := h.getClient(uid); client != nil && client.accountType == types.AccountBot {
+	if client.accountType == types.AccountBot {
 		h.botStats.RecordSent(uid, topic)
 	}
 	if peerClient := h.getClient(peerUID); peerClient != nil && peerClient.accountType == types.AccountBot {
@@ -340,17 +373,19 @@ func (h *Hub) handlePub(uid int64, msg *MsgClientPub) {
 		},
 	}
 
-	// Deliver to the peer only (sender already got ctrl with seq)
+	// Sync the sender's other devices, then deliver to the peer.
+	h.SendToUserExcept(uid, dataMsg, client)
 	if peerUID > 0 {
 		h.SendToUser(peerUID, dataMsg)
 	}
 }
 
 // handleGroupPub handles publishing a message to a group topic.
-func (h *Hub) handleGroupPub(uid int64, msg *MsgClientPub, topic, content, msgType string) {
+func (h *Hub) handleGroupPub(client *Client, msg *MsgClientPub, topic, content, msgType string) {
+	uid := client.uid
 	groupID := extractGroupID(topic)
 	if groupID == 0 {
-		h.SendToUser(uid, &ServerMessage{
+		h.SendToClient(client, &ServerMessage{
 			Ctrl: &MsgServerCtrl{ID: msg.ID, Code: 400, Text: "invalid group topic"},
 		})
 		return
@@ -359,7 +394,7 @@ func (h *Hub) handleGroupPub(uid int64, msg *MsgClientPub, topic, content, msgTy
 	// Verify sender is a group member
 	isMember, err := h.db.IsGroupMember(groupID, uid)
 	if err != nil || !isMember {
-		h.SendToUser(uid, &ServerMessage{
+		h.SendToClient(client, &ServerMessage{
 			Ctrl: &MsgServerCtrl{ID: msg.ID, Code: 403, Text: "not a group member"},
 		})
 		return
@@ -368,7 +403,7 @@ func (h *Hub) handleGroupPub(uid int64, msg *MsgClientPub, topic, content, msgTy
 	// Check if member is muted
 	isMuted, _ := h.db.IsMemberMuted(groupID, uid)
 	if isMuted {
-		h.SendToUser(uid, &ServerMessage{
+		h.SendToClient(client, &ServerMessage{
 			Ctrl: &MsgServerCtrl{ID: msg.ID, Code: 403, Text: "you are muted in this group"},
 		})
 		return
@@ -383,14 +418,14 @@ func (h *Hub) handleGroupPub(uid int64, msg *MsgClientPub, topic, content, msgTy
 	}
 	if err != nil {
 		log.Printf("save group message error: %v", err)
-		h.SendToUser(uid, &ServerMessage{
+		h.SendToClient(client, &ServerMessage{
 			Ctrl: &MsgServerCtrl{ID: msg.ID, Code: 500, Text: "save failed"},
 		})
 		return
 	}
 
 	// Confirm to sender
-	h.SendToUser(uid, &ServerMessage{
+	h.SendToClient(client, &ServerMessage{
 		Ctrl: &MsgServerCtrl{
 			ID:    msg.ID,
 			Topic: topic,
@@ -416,8 +451,8 @@ func (h *Hub) handleGroupPub(uid int64, msg *MsgClientPub, topic, content, msgTy
 		},
 	}
 
-	// Broadcast to all group members except sender (sender already got ctrl with seq)
-	// Pass mentions for Bot @trigger filtering
+	// Sync the sender's other devices, then broadcast to other members.
+	h.SendToUserExcept(uid, dataMsg, client)
 	h.broadcastToGroupWithMentions(groupID, dataMsg, uid, mentions, uid)
 }
 
@@ -451,9 +486,9 @@ func extractGroupID(topic string) int64 {
 }
 
 // handleSub handles a subscribe request (join a topic).
-func (h *Hub) handleSub(uid int64, msg *MsgClientSub) {
+func (h *Hub) handleSub(client *Client, msg *MsgClientSub) {
 	// For now, just acknowledge the subscription
-	h.SendToUser(uid, &ServerMessage{
+	h.SendToClient(client, &ServerMessage{
 		Ctrl: &MsgServerCtrl{
 			ID:    msg.ID,
 			Topic: msg.Topic,
@@ -464,7 +499,8 @@ func (h *Hub) handleSub(uid int64, msg *MsgClientSub) {
 }
 
 // handleGet handles data retrieval requests (message history, online status).
-func (h *Hub) handleGet(uid int64, msg *MsgClientGet) {
+func (h *Hub) handleGet(client *Client, msg *MsgClientGet) {
+	uid := client.uid
 	switch msg.What {
 	case "online":
 		// Return online status of friends
@@ -479,7 +515,7 @@ func (h *Hub) handleGet(uid int64, msg *MsgClientGet) {
 				"online": h.IsOnline(f.ID),
 			})
 		}
-		h.SendToUser(uid, &ServerMessage{
+		h.SendToClient(client, &ServerMessage{
 			Meta: &MsgServerMeta{
 				ID:    msg.ID,
 				Topic: msg.Topic,
@@ -497,7 +533,7 @@ func (h *Hub) handleGet(uid int64, msg *MsgClientGet) {
 		}
 		// Send each message as a data message
 		for _, m := range msgs {
-			h.SendToUser(uid, &ServerMessage{
+			h.SendToClient(client, &ServerMessage{
 				Data: &MsgServerData{
 					Topic:   m.TopicID,
 					From:    formatUID(m.FromUID),
@@ -507,7 +543,7 @@ func (h *Hub) handleGet(uid int64, msg *MsgClientGet) {
 			})
 		}
 		// Send ctrl to indicate history is complete
-		h.SendToUser(uid, &ServerMessage{
+		h.SendToClient(client, &ServerMessage{
 			Ctrl: &MsgServerCtrl{
 				ID:    msg.ID,
 				Topic: msg.Topic,
@@ -519,7 +555,8 @@ func (h *Hub) handleGet(uid int64, msg *MsgClientGet) {
 }
 
 // handleNote handles typing indicators and read receipts.
-func (h *Hub) handleNote(uid int64, msg *MsgClientNote) {
+func (h *Hub) handleNote(client *Client, msg *MsgClientNote) {
+	uid := client.uid
 	infoMsg := &ServerMessage{
 		Info: &MsgServerInfo{
 			Topic: msg.Topic,
@@ -586,7 +623,10 @@ func parseInt64(s string) int64 {
 func (h *Hub) getClient(uid int64) *Client {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
-	return h.clients[uid]
+	for client := range h.clients[uid] {
+		return client
+	}
+	return nil
 }
 
 // --- Bot-to-Bot loop protection ---

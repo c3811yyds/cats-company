@@ -26,13 +26,17 @@ struct GroupMember: Codable, Identifiable {
     let userId: Int64
     let username: String
     var displayName: String?
+    var avatarUrl: String?
     var role: String? // "owner", "admin", "member"
+    var isBot: Bool?
 
     enum CodingKeys: String, CodingKey {
         case userId = "user_id"
         case username
         case displayName = "display_name"
+        case avatarUrl = "avatar_url"
         case role
+        case isBot = "is_bot"
     }
 }
 

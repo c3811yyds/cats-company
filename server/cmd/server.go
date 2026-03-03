@@ -61,6 +61,7 @@ func main() {
 
 	userHandler := server.NewUserHandler(db)
 	friendHandler := server.NewFriendHandler(db)
+	conversationHandler := server.NewConversationHandler(db, hub)
 	botHandler := server.NewBotHandler(db, deployer)
 	msgHandler := server.NewMessageHandler(db)
 	uploadHandler := server.NewUploadHandler("./uploads", "/uploads")
@@ -104,10 +105,12 @@ func main() {
 
 	// User profile (require auth — JWT or API Key)
 	mux.HandleFunc("/api/me", authWithDB(userHandler.HandleMe))
+	mux.HandleFunc("/api/me/update", server.AuthMiddleware(userHandler.HandleUpdateMe))
 
-	// Messages (require auth) — kept for REST fallback
-	mux.HandleFunc("/api/messages/send", server.AuthMiddleware(msgHandler.HandleSendMessage))
-	mux.HandleFunc("/api/messages", server.AuthMiddleware(msgHandler.HandleGetMessages))
+	// Messages (require auth — JWT or API Key for bot access)
+	mux.HandleFunc("/api/messages/send", authWithDB(msgHandler.HandleSendMessage))
+	mux.HandleFunc("/api/messages", authWithDB(msgHandler.HandleGetMessages))
+	mux.HandleFunc("/api/conversations", authWithDB(conversationHandler.HandleList))
 
 	// Online status API
 	mux.HandleFunc("/api/users/online", server.AuthMiddleware(func(w http.ResponseWriter, r *http.Request) {
@@ -145,6 +148,7 @@ func main() {
 	mux.HandleFunc("/api/groups", server.AuthMiddleware(groupHandler.HandleGetGroups))
 	mux.HandleFunc("/api/groups/create", server.AuthMiddleware(groupHandler.HandleCreateGroup))
 	mux.HandleFunc("/api/groups/info", server.AuthMiddleware(groupHandler.HandleGetGroupInfo))
+	mux.HandleFunc("/api/groups/update", server.AuthMiddleware(groupHandler.HandleUpdateGroup))
 	mux.HandleFunc("/api/groups/invite", server.AuthMiddleware(groupHandler.HandleInviteMembers))
 	mux.HandleFunc("/api/groups/leave", server.AuthMiddleware(groupHandler.HandleLeaveGroup))
 	mux.HandleFunc("/api/groups/kick", server.AuthMiddleware(groupHandler.HandleKickMember))

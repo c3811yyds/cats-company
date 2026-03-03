@@ -81,6 +81,11 @@ enum MessageContent: Codable, Equatable {
             }
             return
         }
+        if let parsed = try? container.decode(ServerRichContent.self),
+           parsed.type != nil {
+            self = .rich(parsed.toRichContent())
+            return
+        }
         if let rich = try? container.decode(RichContent.self) {
             self = .rich(rich)
             return
@@ -99,7 +104,11 @@ enum MessageContent: Codable, Equatable {
     var displayText: String {
         switch self {
         case .text(let s): return s
-        case .rich(let r): return r.text ?? r.title ?? "[富媒体消息]"
+        case .rich(let r):
+            if r.type == "file" {
+                return r.fileName ?? "[文件]"
+            }
+            return r.text ?? r.title ?? "[富媒体消息]"
         }
     }
 }
@@ -136,19 +145,31 @@ struct ServerRichContent: Decodable {
         let size: Int?
         let fileKey: String?
         let mimeType: String?
+        let title: String?
+        let text: String?
+        let description: String?
+        let image: String?
+        let imageURL: String?
+        let siteName: String?
 
         enum CodingKeys: String, CodingKey {
-            case url, thumbnail, name, size
+            case url, thumbnail, name, size, title, text, description, image
             case fileKey = "file_key"
             case mimeType = "mime_type"
+            case imageURL = "image_url"
+            case siteName = "site_name"
         }
     }
 
     func toRichContent() -> RichContent {
-        RichContent(
+        let resolvedImage = payload?.thumbnail ?? payload?.imageURL ?? payload?.image ?? payload?.url
+        return RichContent(
             type: type,
+            text: payload?.text,
+            title: payload?.title,
             url: payload?.url,
-            imageUrl: payload?.thumbnail ?? payload?.url,
+            description: payload?.description ?? payload?.siteName,
+            imageUrl: resolvedImage,
             fileName: payload?.name,
             fileSize: payload?.size,
             mimeType: payload?.mimeType

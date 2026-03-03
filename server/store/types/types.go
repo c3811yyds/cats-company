@@ -71,6 +71,21 @@ type Message struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 
+// ConversationSummary is the lightweight chat-list payload for a topic.
+type ConversationSummary struct {
+	ID        string     `json:"id"`
+	Name      string     `json:"name"`
+	Preview   string     `json:"preview,omitempty"`
+	IsGroup   bool       `json:"is_group"`
+	GroupID   int64      `json:"group_id,omitempty"`
+	FriendID  int64      `json:"friend_id,omitempty"`
+	AvatarURL string     `json:"avatar_url,omitempty"`
+	IsBot     bool       `json:"is_bot,omitempty"`
+	IsOnline  bool       `json:"is_online,omitempty"`
+	LastTime  *time.Time `json:"last_time,omitempty"`
+	LatestSeq int64      `json:"latest_seq,omitempty"`
+}
+
 // RichContent is the unified message payload structure.
 // All messages use this format: { "type": "text"|"image"|"file"|"card"|"link_preview", "payload": {...} }
 type RichContent struct {

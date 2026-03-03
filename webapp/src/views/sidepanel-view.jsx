@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { api, onWSMessage, updateTopicSeq } from '../api';
 import t from '../i18n';
 import CreateGroup from '../widgets/create-group';
+import Avatar from '../widgets/avatar';
 
 export default function ChatListView({ activeTopic, onSelectTopic, user, onlineUsers }) {
   const [chats, setChats] = useState([]);
@@ -12,26 +13,31 @@ export default function ChatListView({ activeTopic, onSelectTopic, user, onlineU
     loadChats();
   }, []);
 
+  useEffect(() => {
+    const reload = () => loadChats();
+    window.addEventListener('cc:data-changed', reload);
+    return () => window.removeEventListener('cc:data-changed', reload);
+  }, []);
+
   // Listen for real-time message updates and group events
   useEffect(() => {
     const unsub = onWSMessage((msg) => {
       if (msg.data) {
         const topicId = msg.data.topic;
-        const content = typeof msg.data.content === 'string' ? msg.data.content : '';
         const seq = msg.data.seq;
         updateTopicSeq(topicId, seq);
         setChats((prev) => {
-          // If topic already in list, update it
-          const exists = prev.some((c) => c.id === topicId);
-          if (exists) {
-            return prev.map((c) =>
-              c.id === topicId
-                ? { ...c, preview: content, time: formatTime(new Date()), seq }
-                : c
-            );
+          const idx = prev.findIndex((c) => c.id === topicId);
+          if (idx !== -1) {
+            const updated = {
+              ...prev[idx],
+              preview: summarizeMessage({ content: msg.data.content }),
+              time: formatTime(new Date()),
+              seq,
+            };
+            return [updated, ...prev.filter((c) => c.id !== topicId)];
           }
-          // If it's a new group topic we haven't seen, reload
-          if (topicId.startsWith('grp_')) {
+          if (topicId.startsWith('grp_') || topicId.startsWith('p2p_')) {
             loadChats();
           }
           return prev;
@@ -51,36 +57,21 @@ export default function ChatListView({ activeTopic, onSelectTopic, user, onlineU
 
   const loadChats = async () => {
     try {
-      const [friendsRes, groupsRes] = await Promise.all([
-        api.getFriends(),
-        api.getGroups(),
-      ]);
-
-      const friends = friendsRes.friends || [];
-      const groups = groupsRes.groups || [];
-
-      const p2pChats = friends.map((f) => {
-        const topicId = p2pTopicId(user.uid, f.id);
-        return {
-          id: topicId,
-          friendId: f.id,
-          name: f.display_name || f.username,
-          preview: '',
-          time: '',
-          isGroup: false,
-        };
-      });
-
-      const groupChats = groups.map((g) => ({
-        id: `grp_${g.id}`,
-        groupId: g.id,
-        name: g.name,
-        preview: '',
-        time: '',
-        isGroup: true,
+      const res = await api.getConversations();
+      const conversations = (res.conversations || []).map((item) => ({
+        id: item.id,
+        friendId: item.friend_id,
+        groupId: item.group_id,
+        name: item.name,
+        preview: item.preview || '',
+        time: item.last_time ? formatTime(new Date(item.last_time)) : '',
+        isGroup: item.is_group,
+        avatar_url: item.avatar_url,
+        isBot: item.is_bot,
+        isOnline: item.is_online,
+        seq: item.latest_seq || 0,
       }));
-
-      setChats([...groupChats, ...p2pChats]);
+      setChats(conversations);
     } catch (e) {
       console.error('Failed to load chats:', e);
     }
@@ -120,17 +111,33 @@ export default function ChatListView({ activeTopic, onSelectTopic, user, onlineU
           </div>
         ) : (
           filtered.map((chat) => {
-            const isOnline = !chat.isGroup && onlineUsers && onlineUsers[chat.friendId];
+            const isOnline = !chat.isGroup && (
+              (onlineUsers && onlineUsers[chat.friendId]) ||
+              chat.isOnline
+            );
             return (
               <div
                 key={chat.id}
                 className={`oc-chat-item ${activeTopic === chat.id ? 'active' : ''}`}
-                onClick={() => onSelectTopic({ topicId: chat.id, name: chat.name, isGroup: chat.isGroup, groupId: chat.groupId })}
+                onClick={() => onSelectTopic({
+                  topicId: chat.id,
+                  name: chat.name,
+                  isGroup: chat.isGroup,
+                  groupId: chat.groupId,
+                  avatar_url: chat.avatar_url,
+                  friendId: chat.friendId,
+                })}
               >
-                <div className="oc-chat-avatar">
-                  {chat.isGroup ? (
-                    <span className="oc-group-icon" aria-label="group">G</span>
-                  ) : (
+                <div className="oc-chat-avatar-wrap">
+                  <Avatar
+                    name={chat.name}
+                    src={chat.avatar_url}
+                    size={48}
+                    isGroup={chat.isGroup}
+                    isBot={chat.isBot}
+                    className="oc-chat-avatar"
+                  />
+                  {!chat.isGroup && (
                     <span className={`oc-online-dot ${isOnline ? 'online' : ''}`} />
                   )}
                 </div>
@@ -159,13 +166,25 @@ export default function ChatListView({ activeTopic, onSelectTopic, user, onlineU
   );
 }
 
-function p2pTopicId(uid1, uid2) {
-  if (uid1 > uid2) [uid1, uid2] = [uid2, uid1];
-  return `p2p_${uid1}_${uid2}`;
-}
-
 function formatTime(date) {
   const h = date.getHours().toString().padStart(2, '0');
   const m = date.getMinutes().toString().padStart(2, '0');
   return `${h}:${m}`;
+}
+
+function summarizeMessage(message) {
+  if (!message) return '';
+  if (typeof message.content === 'string') {
+    try {
+      const parsed = JSON.parse(message.content);
+      if (parsed?.type === 'file') return parsed?.payload?.name || '[文件]';
+      if (parsed?.type === 'image') return '[图片]';
+    } catch (err) {
+      return message.content;
+    }
+    return message.content;
+  }
+  if (message.content?.type === 'file') return message.content?.payload?.name || '[文件]';
+  if (message.content?.type === 'image') return '[图片]';
+  return message.content?.text || '';
 }

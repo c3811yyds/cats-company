@@ -1,19 +1,27 @@
-import React, { useState, useRef, useEffect, useCallback } from 'react';
+import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { api, wsSendMessage, wsSendTyping, wsSendRead, onWSMessage, updateTopicSeq } from '../api';
 import t from '../i18n';
 import ChatMessage from '../widgets/chat-message';
+import GroupSettings from '../widgets/group-settings';
+import Avatar from '../widgets/avatar';
 
-export default function MessagesView({ topic, topicName, user, isGroup, groupId }) {
+const PAGE_SIZE = 200;
+
+export default function MessagesView({ topic, topicName, user, isGroup, groupId, topicAvatarUrl, onTopicUpdated }) {
   const [input, setInput] = useState('');
   const [messages, setMessages] = useState([]);
   const [peerTyping, setPeerTyping] = useState(false);
-  const [typingUser, setTypingUser] = useState('');
   const [members, setMembers] = useState([]);
+  const [groupInfo, setGroupInfo] = useState(null);
+  const [peerProfile, setPeerProfile] = useState(null);
   const [showMentionPicker, setShowMentionPicker] = useState(false);
   const [mentionFilter, setMentionFilter] = useState('');
   const [replyTo, setReplyTo] = useState(null);
+  const [historyOffset, setHistoryOffset] = useState(0);
+  const [hasMoreHistory, setHasMoreHistory] = useState(false);
+  const [loadingOlder, setLoadingOlder] = useState(false);
+  const [showGroupSettings, setShowGroupSettings] = useState(false);
   const bottomRef = useRef(null);
-  const typingTimer = useRef(null);
   const lastTypingSent = useRef(0);
   const peerTypingTimer = useRef(null);
   const fileInputRef = useRef(null);
@@ -27,9 +35,15 @@ export default function MessagesView({ topic, topicName, user, isGroup, groupId 
     setPeerTyping(false);
     setReplyTo(null);
     setMembers([]);
+    setGroupInfo(null);
+    setPeerProfile(null);
+    setHistoryOffset(0);
+    setHasMoreHistory(false);
     loadHistory();
     if (isGroup && groupId) {
       loadGroupMembers();
+    } else {
+      loadPeerProfile();
     }
   }, [topic]);
 
@@ -39,8 +53,24 @@ export default function MessagesView({ topic, topicName, user, isGroup, groupId 
       if (res.members) {
         setMembers(res.members);
       }
+      if (res.group) {
+        setGroupInfo(res.group);
+      }
     } catch (e) {
       console.error('Failed to load group members:', e);
+    }
+  };
+
+  const loadPeerProfile = async () => {
+    try {
+      const res = await api.getFriends();
+      const friends = res.friends || [];
+      const [left, right] = topic.replace('p2p_', '').split('_').map((n) => parseInt(n, 10));
+      const peerId = left === user.uid ? right : left;
+      const peer = friends.find((friend) => friend.id === peerId);
+      if (peer) setPeerProfile(peer);
+    } catch (e) {
+      console.error('Failed to load peer profile:', e);
     }
   };
 
@@ -72,7 +102,7 @@ export default function MessagesView({ topic, topicName, user, isGroup, groupId 
               return next;
             }
           }
-          return [...prev, serverMsg];
+          return mergeMessages(prev, [serverMsg]);
         });
         updateTopicSeq(topic, msg.data.seq);
         // Send read receipt if message is from peer
@@ -86,7 +116,6 @@ export default function MessagesView({ topic, topicName, user, isGroup, groupId 
         const fromUid = parseUid(msg.info.from);
         if (fromUid !== user.uid) {
           setPeerTyping(true);
-          setTypingUser(msg.info.from);
           clearTimeout(peerTypingTimer.current);
           peerTypingTimer.current = setTimeout(() => setPeerTyping(false), 3000);
         }
@@ -108,12 +137,30 @@ export default function MessagesView({ topic, topicName, user, isGroup, groupId 
 
   const loadHistory = async () => {
     try {
-      const res = await api.getMessages(topic);
+      const res = await api.getMessages(topic, PAGE_SIZE, 0, true);
       if (res.messages) {
         setMessages(res.messages);
+        setHistoryOffset(res.messages.length);
+        setHasMoreHistory(res.messages.length === PAGE_SIZE);
       }
     } catch (e) {
       console.error('Failed to load messages:', e);
+    }
+  };
+
+  const loadOlderHistory = async () => {
+    if (loadingOlder || !hasMoreHistory) return;
+    setLoadingOlder(true);
+    try {
+      const res = await api.getMessages(topic, PAGE_SIZE, historyOffset, true);
+      const older = res.messages || [];
+      setMessages((prev) => mergeMessages(older, prev));
+      setHistoryOffset((prev) => prev + older.length);
+      setHasMoreHistory(older.length === PAGE_SIZE);
+    } catch (e) {
+      console.error('Failed to load older messages:', e);
+    } finally {
+      setLoadingOlder(false);
     }
   };
 
@@ -141,7 +188,7 @@ export default function MessagesView({ topic, topicName, user, isGroup, groupId 
     const wsId = await wsSendMessage(topic, text, currentReplyTo ? currentReplyTo.id : undefined);
     if (wsId === null) {
       // REST fallback was used -- reload history to get server-assigned ID
-      const res = await api.getMessages(topic);
+      const res = await api.getMessages(topic, PAGE_SIZE, 0, true);
       if (res.messages) setMessages(res.messages);
     }
   }, [input, topic, user.uid, replyTo]);
@@ -235,7 +282,7 @@ export default function MessagesView({ topic, topicName, user, isGroup, groupId 
       // Refresh history after send so uploads appear immediately without a manual reopen.
       for (let attempt = 0; attempt < 3; attempt++) {
         await new Promise((resolve) => window.setTimeout(resolve, 400));
-        const history = await api.getMessages(topic);
+        const history = await api.getMessages(topic, PAGE_SIZE, 0, true);
         if (history.messages) {
           setMessages(history.messages);
           const matched = history.messages.some((msg) => {
@@ -277,30 +324,100 @@ export default function MessagesView({ topic, topicName, user, isGroup, groupId 
     return name.includes(mentionFilter);
   });
 
-  const displayName = topicName || topic;
+  const displayName = isGroup ? (groupInfo?.name || topicName || topic) : (peerProfile?.display_name || peerProfile?.username || topicName || topic);
+  const displayAvatarUrl = isGroup ? (groupInfo?.avatar_url || topicAvatarUrl) : (peerProfile?.avatar_url || topicAvatarUrl);
+
+  const memberMap = useMemo(() => {
+    const map = new Map();
+    members.forEach((member) => {
+      map.set(member.user_id, member);
+    });
+    return map;
+  }, [members]);
+
+  const getSender = (msg) => {
+    if (msg.from_uid === user.uid) {
+      return {
+        name: user.display_name || user.username,
+        avatarUrl: user.avatar_url,
+        isBot: user.account_type === 'bot',
+      };
+    }
+    if (isGroup) {
+      const member = memberMap.get(msg.from_uid);
+      return {
+        name: member ? (member.display_name || member.username) : `usr${msg.from_uid}`,
+        avatarUrl: member?.avatar_url,
+        isBot: member?.is_bot,
+      };
+    }
+    return {
+      name: peerProfile?.display_name || peerProfile?.username || topicName || topic,
+      avatarUrl: peerProfile?.avatar_url || topicAvatarUrl,
+      isBot: peerProfile?.account_type === 'bot',
+    };
+  };
+
+  const handleGroupSaved = (updatedGroup) => {
+    setShowGroupSettings(false);
+    if (updatedGroup) {
+      setGroupInfo(updatedGroup);
+      if (onTopicUpdated) {
+        onTopicUpdated({
+          topicId: topic,
+          name: updatedGroup.name,
+          avatar_url: updatedGroup.avatar_url,
+          isGroup: true,
+          groupId,
+        });
+      }
+    }
+    loadGroupMembers();
+    window.dispatchEvent(new Event('cc:data-changed'));
+  };
 
   return (
     <>
       <div className="oc-header">
-        {displayName}
+        <div className="oc-chat-header-main">
+          <Avatar name={displayName} src={displayAvatarUrl} size={36} isGroup={isGroup} className="oc-chat-header-avatar" />
+          <span>{displayName}</span>
+        </div>
         {isGroup && members.length > 0 && (
           <span style={{ fontSize: 12, color: '#888', marginLeft: 8 }}>
             ({members.length})
           </span>
         )}
+        {isGroup && (
+          <button className="oc-header-action" onClick={() => setShowGroupSettings(true)} title={t('group_settings')}>
+            ⋯
+          </button>
+        )}
       </div>
       <div className="oc-messages">
-        {messages.map((msg, i) => (
-          <ChatMessage
-            key={msg.id || i}
-            message={msg}
-            isSelf={msg.from_uid === user.uid}
-            isGroup={isGroup}
-            senderName={isGroup ? getMemberName(msg.from_uid) : null}
-            replyMessage={getReplyMessage(msg.reply_to)}
-            onReply={() => setReplyTo(msg)}
-          />
-        ))}
+        {hasMoreHistory && (
+          <div className="oc-history-load">
+            <button className="oc-btn oc-btn-default" onClick={loadOlderHistory} disabled={loadingOlder}>
+              {loadingOlder ? t('loading') : t('chat_load_older')}
+            </button>
+          </div>
+        )}
+        {messages.map((msg, i) => {
+          const sender = getSender(msg);
+          return (
+            <ChatMessage
+              key={msg.id || i}
+              message={msg}
+              isSelf={msg.from_uid === user.uid}
+              isGroup={isGroup}
+              senderName={sender.name}
+              senderAvatarUrl={sender.avatarUrl}
+              senderIsBot={sender.isBot}
+              replyMessage={getReplyMessage(msg.reply_to)}
+              onReply={() => setReplyTo(msg)}
+            />
+          );
+        })}
         {peerTyping && (
           <div className="oc-typing-indicator">
             <span className="oc-typing-dots">
@@ -335,7 +452,7 @@ export default function MessagesView({ topic, topicName, user, isGroup, groupId 
                 className="oc-mention-item"
                 onClick={() => insertMention(m)}
               >
-                <div className="oc-contact-avatar" style={{ width: 24, height: 24, borderRadius: 4 }} />
+                <Avatar name={m.display_name || m.username} src={m.avatar_url} size={24} isBot={m.is_bot} className="oc-contact-avatar" />
                 <span>{m.display_name || m.username}</span>
               </div>
             ))}
@@ -368,6 +485,13 @@ export default function MessagesView({ topic, topicName, user, isGroup, groupId 
         <input ref={imageInputRef} type="file" accept="image/*" style={{ display: 'none' }} onChange={(e) => handleFileUpload(e, 'image')} />
         <input ref={fileInputRef} type="file" style={{ display: 'none' }} onChange={(e) => handleFileUpload(e, 'file')} />
       </div>
+      {showGroupSettings && isGroup && groupId && (
+        <GroupSettings
+          groupId={groupId}
+          onClose={() => setShowGroupSettings(false)}
+          onSaved={handleGroupSaved}
+        />
+      )}
     </>
   );
 }
@@ -379,4 +503,12 @@ function parseUid(uidStr) {
     return parseInt(uidStr.slice(3), 10) || 0;
   }
   return parseInt(uidStr, 10) || 0;
+}
+
+function mergeMessages(primary, secondary) {
+  const byId = new Map();
+  [...primary, ...secondary].forEach((message) => {
+    byId.set(message.id, message);
+  });
+  return Array.from(byId.values()).sort((a, b) => a.id - b.id);
 }

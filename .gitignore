@@ -12,6 +12,7 @@ openchat-server
 .vscode/
 *.swp
 *.swo
+ios/CatsCompany.xcodeproj/project.xcworkspace/xcuserdata/
 
 # OS
 .DS_Store
@@ -33,3 +34,8 @@ deploy/nginx/ssl/fullchain.pem
 # Data
 mysql_data/
 *.log
+
+# Local AI tooling
+.claude/
+CLAUDE.md
+packages/skills/scripts/__pycache__/

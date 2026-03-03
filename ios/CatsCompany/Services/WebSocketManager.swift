@@ -6,28 +6,114 @@ import Combine
 class WebSocketManager: ObservableObject {
     static let shared = WebSocketManager()
 
+    typealias ListenerID = UUID
+
     @Published var isConnected = false
 
     private var webSocket: URLSessionWebSocketTask?
     private var session: URLSession = .shared
     private var reconnectTask: Task<Void, Never>?
     private var msgIdCounter = 0
-    private var topicLastSeq: [String: Int] = [:]
-
-    // Callbacks
-    var onData: ((WSData) -> Void)?
-    var onPres: ((WSPres) -> Void)?
-    var onInfo: ((WSInfo) -> Void)?
-    var onCtrl: ((WSCtrl) -> Void)?
-    var onFriend: ((WSFriendEvent) -> Void)?
-    var onConnected: (() -> Void)?
-    var onDisconnected: (() -> Void)?
+    private var topicLastSeq: [String: Int] = [:] {
+        didSet { UserDefaults.standard.set(topicLastSeq, forKey: "cc_topic_last_seq") }
+    }
+    private var dataListeners: [ListenerID: (WSData) -> Void] = [:]
+    private var presenceListeners: [ListenerID: (WSPres) -> Void] = [:]
+    private var infoListeners: [ListenerID: (WSInfo) -> Void] = [:]
+    private var ctrlListeners: [ListenerID: (WSCtrl) -> Void] = [:]
+    private var friendListeners: [ListenerID: (WSFriendEvent) -> Void] = [:]
+    private var connectedListeners: [ListenerID: () -> Void] = [:]
+    private var disconnectedListeners: [ListenerID: () -> Void] = [:]
 
     private init() {}
 
     func nextId() -> String {
         msgIdCounter += 1
         return String(msgIdCounter)
+    }
+
+    @discardableResult
+    func addDataListener(_ listener: @escaping (WSData) -> Void) -> ListenerID {
+        let id = ListenerID()
+        dataListeners[id] = listener
+        return id
+    }
+
+    func removeDataListener(_ id: ListenerID?) {
+        guard let id else { return }
+        dataListeners.removeValue(forKey: id)
+    }
+
+    @discardableResult
+    func addPresenceListener(_ listener: @escaping (WSPres) -> Void) -> ListenerID {
+        let id = ListenerID()
+        presenceListeners[id] = listener
+        return id
+    }
+
+    func removePresenceListener(_ id: ListenerID?) {
+        guard let id else { return }
+        presenceListeners.removeValue(forKey: id)
+    }
+
+    @discardableResult
+    func addInfoListener(_ listener: @escaping (WSInfo) -> Void) -> ListenerID {
+        let id = ListenerID()
+        infoListeners[id] = listener
+        return id
+    }
+
+    func removeInfoListener(_ id: ListenerID?) {
+        guard let id else { return }
+        infoListeners.removeValue(forKey: id)
+    }
+
+    @discardableResult
+    func addCtrlListener(_ listener: @escaping (WSCtrl) -> Void) -> ListenerID {
+        let id = ListenerID()
+        ctrlListeners[id] = listener
+        return id
+    }
+
+    func removeCtrlListener(_ id: ListenerID?) {
+        guard let id else { return }
+        ctrlListeners.removeValue(forKey: id)
+    }
+
+    @discardableResult
+    func addFriendListener(_ listener: @escaping (WSFriendEvent) -> Void) -> ListenerID {
+        let id = ListenerID()
+        friendListeners[id] = listener
+        return id
+    }
+
+    func removeFriendListener(_ id: ListenerID?) {
+        guard let id else { return }
+        friendListeners.removeValue(forKey: id)
+    }
+
+    @discardableResult
+    func addConnectedListener(_ listener: @escaping () -> Void) -> ListenerID {
+        let id = ListenerID()
+        connectedListeners[id] = listener
+        return id
+    }
+
+    func removeConnectedListener(_ id: ListenerID?) {
+        guard let id else { return }
+        connectedListeners.removeValue(forKey: id)
+    }
+
+    @discardableResult
+    func addDisconnectedListener(_ listener: @escaping () -> Void) -> ListenerID {
+        let id = ListenerID()
+        disconnectedListeners[id] = listener
+        return id
+    }
+
+    func removeDisconnectedListener(_ id: ListenerID?) {
+        guard let id else { return }
+        disconnectedListeners.removeValue(forKey: id)
     }
 
     // MARK: - Connect / Disconnect
@@ -56,7 +142,9 @@ class WebSocketManager: ObservableObject {
             requestMissedMessages(topic: topic)
         }
 
-        onConnected?()
+        for listener in connectedListeners.values {
+            listener()
+        }
     }
 
     func disconnect(reconnect: Bool = false) {
@@ -66,7 +154,9 @@ class WebSocketManager: ObservableObject {
         webSocket = nil
         if isConnected {
             isConnected = false
-            onDisconnected?()
+            for listener in disconnectedListeners.values {
+                listener()
+            }
         }
         if reconnect {
             scheduleReconnect()
@@ -163,20 +253,30 @@ class WebSocketManager: ObservableObject {
         }
 
         if let ctrl = msg.ctrl {
-            onCtrl?(ctrl)
+            for listener in ctrlListeners.values {
+                listener(ctrl)
+            }
         }
         if let d = msg.data {
             updateTopicSeq(d.topic, seq: d.seq)
-            onData?(d)
+            for listener in dataListeners.values {
+                listener(d)
+            }
         }
         if let pres = msg.pres {
-            onPres?(pres)
+            for listener in presenceListeners.values {
+                listener(pres)
+            }
         }
         if let info = msg.info {
-            onInfo?(info)
+            for listener in infoListeners.values {
+                listener(info)
+            }
         }
         if let friend = msg.friend {
-            onFriend?(friend)
+            for listener in friendListeners.values {
+                listener(friend)
+            }
         }
     }
 }

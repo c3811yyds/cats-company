@@ -317,6 +317,35 @@ func (a *Adapter) SetGroupAnnouncement(groupID int64, announcement string) error
 	return nil
 }
 
+// UpdateGroupProfile updates mutable group profile fields and keeps the topic name in sync.
+func (a *Adapter) UpdateGroupProfile(groupID int64, name, avatarURL string) error {
+	tx, err := a.db.Begin()
+	if err != nil {
+		return fmt.Errorf("update group begin tx: %w", err)
+	}
+	defer tx.Rollback()
+
+	if _, err := tx.Exec(
+		"UPDATE `groups` SET name = ?, avatar_url = ? WHERE id = ?",
+		name, avatarURL, groupID,
+	); err != nil {
+		return fmt.Errorf("update group profile: %w", err)
+	}
+
+	topicID := fmt.Sprintf("grp_%d", groupID)
+	if _, err := tx.Exec(
+		"UPDATE topics SET name = ? WHERE id = ?",
+		name, topicID,
+	); err != nil {
+		return fmt.Errorf("update group topic: %w", err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("update group commit: %w", err)
+	}
+	return nil
+}
+
 // IsUserBot checks if a user has account_type = 'bot'.
 func (a *Adapter) IsUserBot(userID int64) (bool, error) {
 	var acctType string

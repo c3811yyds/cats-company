@@ -18,11 +18,13 @@ const (
 
 // SendToUser sends a server message to a specific user if online.
 func (h *Hub) SendToUser(uid int64, msg *ServerMessage) {
-	h.mu.RLock()
-	client, ok := h.clients[uid]
-	h.mu.RUnlock()
+	h.SendToUserExcept(uid, msg, nil)
+}
 
-	if !ok {
+// SendToUserExcept sends a server message to all of a user's connections except one.
+func (h *Hub) SendToUserExcept(uid int64, msg *ServerMessage, exclude *Client) {
+	clients := h.getClients(uid)
+	if len(clients) == 0 {
 		return
 	}
 
@@ -32,27 +34,112 @@ func (h *Hub) SendToUser(uid int64, msg *ServerMessage) {
 		return
 	}
 
-	select {
-	case client.send <- data:
-	default:
-		// Client buffer full, disconnect
-		h.mu.Lock()
-		delete(h.clients, uid)
-		close(client.send)
-		h.mu.Unlock()
+	for _, client := range clients {
+		if client == exclude {
+			continue
+		}
+		h.sendRawToClient(client, data)
 	}
+}
+
+// SendToClient sends a server message to a specific connection.
+func (h *Hub) SendToClient(client *Client, msg *ServerMessage) {
+	if client == nil {
+		return
+	}
+
+	data, err := json.Marshal(msg)
+	if err != nil {
+		log.Printf("marshal error: %v", err)
+		return
+	}
+
+	h.sendRawToClient(client, data)
+}
+
+func (h *Hub) sendRawToClient(client *Client, data []byte) {
+	if client == nil {
+		return
+	}
+	if client.trySend(data) {
+		return
+	}
+	h.disconnectClient(client, "send buffer full")
+}
+
+func (h *Hub) disconnectClient(client *Client, reason string) {
+	removed, lastConn, remaining, onlineUsers := h.removeClient(client)
+	client.closeSend()
+	if client.conn != nil {
+		_ = client.conn.Close()
+	}
+
+	if !removed {
+		return
+	}
+
+	if reason == "" {
+		log.Printf("client disconnected: uid=%d (devices: %d, online users: %d)", client.uid, remaining, onlineUsers)
+	} else {
+		log.Printf("client disconnected: uid=%d (%s, devices: %d, online users: %d)", client.uid, reason, remaining, onlineUsers)
+	}
+	if lastConn {
+		h.broadcastPresence(client.uid, "off")
+	}
+}
+
+func (h *Hub) getClients(uid int64) []*Client {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+
+	clients := h.clients[uid]
+	if len(clients) == 0 {
+		return nil
+	}
+
+	out := make([]*Client, 0, len(clients))
+	for client := range clients {
+		out = append(out, client)
+	}
+	return out
 }
 
 // IsOnline checks if a user is currently connected.
 func (h *Hub) IsOnline(uid int64) bool {
 	h.mu.RLock()
-	_, ok := h.clients[uid]
-	h.mu.RUnlock()
-	return ok
+	defer h.mu.RUnlock()
+	return len(h.clients[uid]) > 0
+}
+
+func (c *Client) trySend(message []byte) bool {
+	c.sendMu.RLock()
+	defer c.sendMu.RUnlock()
+
+	if c.sendClosed {
+		return false
+	}
+
+	select {
+	case c.send <- message:
+		return true
+	default:
+		return false
+	}
+}
+
+func (c *Client) closeSend() {
+	c.sendMu.Lock()
+	defer c.sendMu.Unlock()
+
+	if c.sendClosed {
+		return
+	}
+	close(c.send)
+	c.sendClosed = true
 }
 
 // ReadPump pumps messages from the WebSocket connection to the hub.
-func (c *Client) ReadPump(handler func(uid int64, msg *ClientMessage)) {
+func (c *Client) ReadPump(handler func(client *Client, msg *ClientMessage)) {
 	defer func() {
 		c.hub.unregister <- c
 		c.conn.Close()
@@ -80,7 +167,7 @@ func (c *Client) ReadPump(handler func(uid int64, msg *ClientMessage)) {
 			continue
 		}
 
-		handler(c.uid, &msg)
+		handler(c, &msg)
 	}
 }
 

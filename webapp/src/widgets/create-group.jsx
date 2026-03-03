@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { api } from '../api';
 import t from '../i18n';
+import Avatar from './avatar';
 
 export default function CreateGroup({ onClose, onCreated }) {
   const [name, setName] = useState('');
@@ -80,7 +81,13 @@ export default function CreateGroup({ onClose, onCreated }) {
                 onChange={() => toggleMember(f.id)}
                 style={{ width: 18, height: 18, accentColor: '#07C160' }}
               />
-              <div className="oc-contact-avatar" style={{ width: 32, height: 32, borderRadius: 4 }} />
+              <Avatar
+                name={f.display_name || f.username}
+                src={f.avatar_url}
+                size={32}
+                isBot={f.account_type === 'bot'}
+                className="oc-contact-avatar"
+              />
               <span style={{ fontSize: 14 }}>{f.display_name || f.username}</span>
             </label>
           ))}

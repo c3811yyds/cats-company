@@ -1,12 +1,11 @@
 import React, { useState } from 'react';
 import { api } from '../api';
 import t from '../i18n';
+import Avatar from './avatar';
 
 export default function AddFriend({ onClose, onSent }) {
   const [query, setQuery] = useState('');
   const [results, setResults] = useState([]);
-  const [message, setMessage] = useState('');
-  const [selected, setSelected] = useState(null);
   const [sent, setSent] = useState(new Set());
 
   const handleSearch = async () => {
@@ -49,7 +48,13 @@ export default function AddFriend({ onClose, onSent }) {
 
         {results.map((user) => (
           <div key={user.id} className="oc-contact-item">
-            <div className="oc-contact-avatar" />
+            <Avatar
+              name={user.display_name || user.username}
+              src={user.avatar_url}
+              size={40}
+              isBot={user.account_type === 'bot'}
+              className="oc-contact-avatar"
+            />
             <span className="oc-contact-name" style={{ flex: 1 }}>
               {user.display_name || user.username}
             </span>

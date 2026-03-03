@@ -21,14 +21,24 @@ class APIClient {
         let uid: Int64
         let username: String
         let displayName: String?
+        let avatarUrl: String?
+        let accountType: String?
 
         enum CodingKeys: String, CodingKey {
             case token, uid, username
             case displayName = "display_name"
+            case avatarUrl = "avatar_url"
+            case accountType = "account_type"
         }
 
         var user: User {
-            User(id: uid, username: username, displayName: displayName)
+            User(
+                id: uid,
+                username: username,
+                displayName: displayName,
+                avatarUrl: avatarUrl,
+                accountType: accountType
+            )
         }
     }
 
@@ -52,6 +62,84 @@ class APIClient {
     private struct UsersResponse: Decodable { let users: [User]? }
     private struct MessagesResponse: Decodable { let messages: [Message]? }
     private struct GroupsResponse: Decodable { let groups: [Group]? }
+    private struct ConversationsResponse: Decodable { let conversations: [ConversationSummary]? }
+    struct MeResponse: Decodable {
+        let uid: Int64
+        let username: String
+        let displayName: String?
+        let avatarUrl: String?
+        let accountType: String?
+
+        enum CodingKeys: String, CodingKey {
+            case uid, username
+            case displayName = "display_name"
+            case avatarUrl = "avatar_url"
+            case accountType = "account_type"
+        }
+
+        var user: User {
+            User(
+                id: uid,
+                username: username,
+                displayName: displayName,
+                avatarUrl: avatarUrl,
+                accountType: accountType
+            )
+        }
+    }
+    struct CreateGroupResponse: Decodable {
+        let groupId: Int64
+        let topic: String
+        let name: String
+
+        enum CodingKeys: String, CodingKey {
+            case topic, name
+            case groupId = "group_id"
+        }
+    }
+    struct GroupInfoResponse: Decodable {
+        let group: Group
+        let members: [GroupMember]
+    }
+    struct GroupUpdateResponse: Decodable {
+        let group: Group
+    }
+    struct ConversationSummary: Decodable {
+        let id: String
+        let name: String
+        let preview: String?
+        let isGroup: Bool
+        let groupId: Int64?
+        let friendId: Int64?
+        let avatarUrl: String?
+        let isBot: Bool
+        let isOnline: Bool
+        let lastTimeRaw: String?
+        let latestSeq: Int?
+
+        enum CodingKeys: String, CodingKey {
+            case id, name, preview
+            case isGroup = "is_group"
+            case groupId = "group_id"
+            case friendId = "friend_id"
+            case avatarUrl = "avatar_url"
+            case isBot = "is_bot"
+            case isOnline = "is_online"
+            case lastTimeRaw = "last_time"
+            case latestSeq = "latest_seq"
+        }
+
+        var lastTime: Date? {
+            guard let lastTimeRaw else { return nil }
+            let formatter = ISO8601DateFormatter()
+            formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+            if let date = formatter.date(from: lastTimeRaw) {
+                return date
+            }
+            formatter.formatOptions = [.withInternetDateTime]
+            return formatter.date(from: lastTimeRaw)
+        }
+    }
 
     // MARK: - Friends
 
@@ -118,11 +206,30 @@ class APIClient {
         try await request(.get, "/api/users/online")
     }
 
+    func getConversations() async throws -> [ConversationSummary] {
+        let resp: ConversationsResponse = try await request(.get, "/api/conversations")
+        return resp.conversations ?? []
+    }
+
+    func getMe() async throws -> User {
+        let resp: MeResponse = try await request(.get, "/api/me")
+        return resp.user
+    }
+
+    func updateMe(displayName: String, avatarUrl: String?) async throws -> User {
+        let resp: MeResponse = try await request(.post, "/api/me/update", body: [
+            "display_name": displayName,
+            "avatar_url": avatarUrl ?? ""
+        ])
+        return resp.user
+    }
+
     // MARK: - Messages
 
-    func getMessages(topicId: String, limit: Int = 50, offset: Int = 0) async throws -> [Message] {
+    func getMessages(topicId: String, limit: Int = 50, offset: Int = 0, latest: Bool = false) async throws -> [Message] {
         let t = topicId.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? topicId
-        let resp: MessagesResponse = try await request(.get, "/api/messages?topic_id=\(t)&limit=\(limit)&offset=\(offset)")
+        let latestFlag = latest ? "&latest=1" : ""
+        let resp: MessagesResponse = try await request(.get, "/api/messages?topic_id=\(t)&limit=\(limit)&offset=\(offset)\(latestFlag)")
         return resp.messages ?? []
     }
 
@@ -134,6 +241,18 @@ class APIClient {
         ])
     }
 
+    func sendRichMessage(topicId: String, content: [String: Any], msgType: String) async throws -> EmptyResponse {
+        let contentData = try JSONSerialization.data(withJSONObject: content)
+        guard let contentString = String(data: contentData, encoding: .utf8) else {
+            throw APIError.unknown
+        }
+        return try await request(.post, "/api/messages/send", body: [
+            "topic_id": topicId,
+            "content": contentString,
+            "msg_type": msgType
+        ])
+    }
+
     // MARK: - Groups
 
     func getGroups() async throws -> [Group] {
@@ -141,15 +260,24 @@ class APIClient {
         return resp.groups ?? []
     }
 
-    func createGroup(name: String, memberIds: [Int64]) async throws -> Group {
+    func createGroup(name: String, memberIds: [Int64]) async throws -> CreateGroupResponse {
         try await request(.post, "/api/groups/create", body: [
             "name": name,
             "member_ids": memberIds
         ] as [String: Any])
     }
 
-    func getGroupInfo(groupId: Int64) async throws -> Group {
+    func getGroupInfo(groupId: Int64) async throws -> GroupInfoResponse {
         try await request(.get, "/api/groups/info?id=\(groupId)")
+    }
+
+    func updateGroup(groupId: Int64, name: String, avatarUrl: String?) async throws -> Group {
+        let resp: GroupUpdateResponse = try await request(.post, "/api/groups/update", body: [
+            "group_id": groupId,
+            "name": name,
+            "avatar_url": avatarUrl ?? ""
+        ])
+        return resp.group
     }
 
     func inviteToGroup(groupId: Int64, userIds: [Int64]) async throws -> EmptyResponse {
@@ -299,8 +427,14 @@ class APIClient {
         req.httpBody = body
 
         let (respData, response) = try await URLSession.shared.data(for: req)
-        guard let http = response as? HTTPURLResponse, http.statusCode < 400 else {
+        guard let http = response as? HTTPURLResponse else {
             throw APIError.unknown
+        }
+        if http.statusCode >= 400 {
+            if let err = try? JSONDecoder().decode(ErrorResponse.self, from: respData) {
+                throw APIError.server(err.error)
+            }
+            throw APIError.httpError(http.statusCode)
         }
         return try JSONDecoder().decode(UploadResponse.self, from: respData)
     }

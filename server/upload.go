@@ -103,6 +103,11 @@ func (h *UploadHandler) HandleUpload(w http.ResponseWriter, r *http.Request) {
 	}
 
 	destPath := filepath.Join(h.baseDir, subDir, fileKey)
+	if err := os.MkdirAll(filepath.Dir(destPath), 0755); err != nil {
+		writeUploadJSON(w, http.StatusInternalServerError, map[string]string{"error": "upload failed"})
+		return
+	}
+
 	dest, err := os.Create(destPath)
 	if err != nil {
 		writeUploadJSON(w, http.StatusInternalServerError, map[string]string{"error": "upload failed"})

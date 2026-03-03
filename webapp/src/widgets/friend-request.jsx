@@ -1,13 +1,19 @@
 import React from 'react';
 import t from '../i18n';
+import Avatar from './avatar';
 
 export default function FriendRequest({ request, onAccept, onReject }) {
   return (
     <div className="oc-friend-request">
-      <div className="oc-contact-avatar" />
+      <Avatar
+        name={request.display_name || request.from_username || `用户 #${request.from_user_id}`}
+        src={request.avatar_url}
+        size={40}
+        className="oc-contact-avatar"
+      />
       <div className="oc-friend-request-info">
         <div className="oc-friend-request-name">
-          用户 #{request.from_user_id}
+          {request.display_name || request.from_username || `用户 #${request.from_user_id}`}
         </div>
         {request.message && (
           <div className="oc-friend-request-msg">{request.message}</div>

@@ -36,6 +36,12 @@ type LoginRequest struct {
 	Password string `json:"password"`
 }
 
+// UpdateProfileRequest is the JSON body for updating the current user's profile.
+type UpdateProfileRequest struct {
+	DisplayName string `json:"display_name"`
+	AvatarURL   string `json:"avatar_url"`
+}
+
 // HandleRegister handles POST /api/auth/register
 func (h *UserHandler) HandleRegister(w http.ResponseWriter, r *http.Request) {
 	var req RegisterRequest
@@ -100,6 +106,8 @@ func (h *UserHandler) HandleRegister(w http.ResponseWriter, r *http.Request) {
 		"uid":          uid,
 		"username":     req.Username,
 		"display_name": displayName,
+		"avatar_url":   user.AvatarURL,
+		"account_type": user.AccountType,
 	})
 }
 
@@ -133,6 +141,8 @@ func (h *UserHandler) HandleLogin(w http.ResponseWriter, r *http.Request) {
 		"uid":          user.ID,
 		"username":     user.Username,
 		"display_name": user.DisplayName,
+		"avatar_url":   user.AvatarURL,
+		"account_type": user.AccountType,
 	})
 }
 
@@ -154,8 +164,48 @@ func (h *UserHandler) HandleMe(w http.ResponseWriter, r *http.Request) {
 		"uid":          user.ID,
 		"username":     user.Username,
 		"display_name": user.DisplayName,
+		"avatar_url":   user.AvatarURL,
 		"account_type": user.AccountType,
 		"created_at":   user.CreatedAt,
+	})
+}
+
+// HandleUpdateMe handles POST /api/me/update — updates the authenticated user's profile.
+func (h *UserHandler) HandleUpdateMe(w http.ResponseWriter, r *http.Request) {
+	uid := UIDFromContext(r.Context())
+	if uid == 0 {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+		return
+	}
+
+	var req UpdateProfileRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request"})
+		return
+	}
+
+	if req.DisplayName == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "display name required"})
+		return
+	}
+
+	if err := h.db.UpdateUser(uid, req.DisplayName, req.AvatarURL); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to update profile"})
+		return
+	}
+
+	user, err := h.db.GetUser(uid)
+	if err != nil || user == nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to load updated profile"})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"uid":          user.ID,
+		"username":     user.Username,
+		"display_name": user.DisplayName,
+		"avatar_url":   user.AvatarURL,
+		"account_type": user.AccountType,
 	})
 }
 

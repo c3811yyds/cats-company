@@ -11,5 +11,6 @@ export declare class FileUploader {
      * Upload a buffer with a given filename.
      */
     uploadBuffer(buffer: Buffer, filename: string, type?: 'image' | 'file'): Promise<UploadResult>;
+    private resolveContentType;
 }
 //# sourceMappingURL=uploader.d.ts.map

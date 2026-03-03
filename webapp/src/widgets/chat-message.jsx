@@ -1,7 +1,9 @@
 import React, { useState } from 'react';
 import t from '../i18n';
+import Avatar from './avatar';
+import { resolveMediaURL } from '../api';
 
-export default function ChatMessage({ message, isSelf, isGroup, senderName, replyMessage, onReply }) {
+export default function ChatMessage({ message, isSelf, isGroup, senderName, senderAvatarUrl, senderIsBot, replyMessage, onReply }) {
   const content = message.content;
 
   // Parse rich content
@@ -20,7 +22,15 @@ export default function ChatMessage({ message, isSelf, isGroup, senderName, repl
 
   return (
     <div className={`oc-msg ${isSelf ? 'self' : ''}`}>
-      <div className="oc-msg-avatar" />
+      {!isSelf && (
+        <Avatar
+          name={senderName || message.from_name || message.from_uid}
+          src={senderAvatarUrl}
+          size={40}
+          isBot={senderIsBot}
+          className="oc-msg-avatar"
+        />
+      )}
       <div className="oc-msg-body">
         {/* Sender name in group chats */}
         {isGroup && !isSelf && senderName && (
@@ -96,7 +106,7 @@ function ImageContent({ payload }) {
   return (
     <div className="oc-rich-image">
       <img
-        src={src}
+        src={resolveMediaURL(src)}
         alt="image"
         className="oc-rich-image-thumb"
         onClick={() => setExpanded(true)}
@@ -104,7 +114,7 @@ function ImageContent({ payload }) {
       />
       {expanded && (
         <div className="oc-modal-overlay" onClick={() => setExpanded(false)}>
-          <img src={payload.url || src} alt="full" style={{ maxWidth: '90vw', maxHeight: '90vh', borderRadius: 8 }} />
+          <img src={resolveMediaURL(payload.url || src)} alt="full" style={{ maxWidth: '90vw', maxHeight: '90vh', borderRadius: 8 }} />
         </div>
       )}
     </div>
@@ -122,7 +132,7 @@ function FileContent({ payload }) {
         {sizeStr && <div className="oc-rich-file-size">{sizeStr}</div>}
       </div>
       {payload.url && (
-        <a href={payload.url} download className="oc-rich-file-download" target="_blank" rel="noopener noreferrer">
+        <a href={resolveMediaURL(payload.url)} download className="oc-rich-file-download" target="_blank" rel="noopener noreferrer">
           下载
         </a>
       )}
@@ -133,8 +143,8 @@ function FileContent({ payload }) {
 function LinkPreviewContent({ payload }) {
   if (!payload) return null;
   return (
-    <a href={payload.url} target="_blank" rel="noopener noreferrer" className="oc-rich-link" style={{ textDecoration: 'none', color: 'inherit' }}>
-      {payload.image && <img src={payload.image} alt="" style={{ width: '100%', maxHeight: 160, objectFit: 'cover', borderRadius: '4px 4px 0 0' }} />}
+    <a href={resolveMediaURL(payload.url)} target="_blank" rel="noopener noreferrer" className="oc-rich-link" style={{ textDecoration: 'none', color: 'inherit' }}>
+      {payload.image && <img src={resolveMediaURL(payload.image)} alt="" style={{ width: '100%', maxHeight: 160, objectFit: 'cover', borderRadius: '4px 4px 0 0' }} />}
       <div style={{ padding: '8px 0' }}>
         <div style={{ fontWeight: 500, fontSize: 14 }}>{payload.title || payload.url}</div>
         {payload.description && <div style={{ fontSize: 12, color: '#888', marginTop: 4 }}>{payload.description}</div>}
@@ -148,7 +158,7 @@ function CardContent({ payload }) {
   if (!payload) return null;
   return (
     <div className="oc-rich-card">
-      {payload.image && <img src={payload.image} alt="" style={{ width: '100%', maxHeight: 120, objectFit: 'cover', borderRadius: '4px 4px 0 0' }} />}
+      {payload.image && <img src={resolveMediaURL(payload.image)} alt="" style={{ width: '100%', maxHeight: 120, objectFit: 'cover', borderRadius: '4px 4px 0 0' }} />}
       <div style={{ padding: 8 }}>
         <div style={{ fontWeight: 600, fontSize: 14 }}>{payload.title}</div>
         {payload.text && <div style={{ fontSize: 13, color: '#666', marginTop: 4 }}>{payload.text}</div>}

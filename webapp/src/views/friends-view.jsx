@@ -4,6 +4,7 @@ import t from '../i18n';
 import FriendRequest from '../widgets/friend-request';
 import AddFriend from '../widgets/add-friend';
 import CreateGroup from '../widgets/create-group';
+import Avatar from '../widgets/avatar';
 
 export default function FriendsView({ onSelectUser, user }) {
   const [friends, setFriends] = useState([]);
@@ -17,6 +18,16 @@ export default function FriendsView({ onSelectUser, user }) {
     loadFriends();
     loadPending();
     loadGroups();
+  }, []);
+
+  useEffect(() => {
+    const reload = () => {
+      loadFriends();
+      loadPending();
+      loadGroups();
+    };
+    window.addEventListener('cc:data-changed', reload);
+    return () => window.removeEventListener('cc:data-changed', reload);
   }, []);
 
   const loadFriends = async () => {
@@ -119,11 +130,15 @@ export default function FriendsView({ onSelectUser, user }) {
               <div
                 key={group.id}
                 className="oc-contact-item"
-                onClick={() => onSelectUser({ topicId: `grp_${group.id}`, name: group.name, isGroup: true, groupId: group.id })}
+                onClick={() => onSelectUser({
+                  topicId: `grp_${group.id}`,
+                  name: group.name,
+                  isGroup: true,
+                  groupId: group.id,
+                  avatar_url: group.avatar_url,
+                })}
               >
-                <div className="oc-contact-avatar oc-group-avatar">
-                  <span className="oc-group-icon">G</span>
-                </div>
+                <Avatar name={group.name} src={group.avatar_url} size={40} isGroup className="oc-contact-avatar oc-group-avatar" />
                 <span className="oc-contact-name">{group.name}</span>
               </div>
             ))
@@ -142,10 +157,22 @@ export default function FriendsView({ onSelectUser, user }) {
               <div
                 key={friend.id}
                 className="oc-contact-item"
-                onClick={() => onSelectUser({ topicId: p2pTopicId(user.uid, friend.id), name: friend.display_name, isGroup: false })}
+                onClick={() => onSelectUser({
+                  topicId: p2pTopicId(user.uid, friend.id),
+                  name: friend.display_name || friend.username,
+                  isGroup: false,
+                  avatar_url: friend.avatar_url,
+                  friendId: friend.id,
+                })}
               >
-                <div className="oc-contact-avatar" />
-                <span className="oc-contact-name">{friend.display_name}</span>
+                <Avatar
+                  name={friend.display_name || friend.username}
+                  src={friend.avatar_url}
+                  size={40}
+                  isBot={friend.account_type === 'bot'}
+                  className="oc-contact-avatar"
+                />
+                <span className="oc-contact-name">{friend.display_name || friend.username}</span>
               </div>
             ))
           )}

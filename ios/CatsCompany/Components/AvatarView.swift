@@ -2,6 +2,7 @@ import SwiftUI
 
 struct AvatarView: View {
     let name: String
+    var avatarURL: String? = nil
     var isBot: Bool = false
     var isGroup: Bool = false
     var size: CGFloat = 40
@@ -26,7 +27,35 @@ struct AvatarView: View {
         return nil
     }
 
+    private var resolvedAvatarURL: URL? {
+        guard let avatarURL, !avatarURL.isEmpty else { return nil }
+        let fullURL = avatarURL.hasPrefix("http") ? avatarURL : APIClient.shared.baseURL + avatarURL
+        return URL(string: fullURL)
+    }
+
     var body: some View {
+        ZStack {
+            if let resolvedAvatarURL {
+                AsyncImage(url: resolvedAvatarURL) { phase in
+                    switch phase {
+                    case .success(let image):
+                        image
+                            .resizable()
+                            .scaledToFill()
+                    default:
+                        fallbackAvatar
+                    }
+                }
+                .frame(width: size, height: size)
+                .clipShape(RoundedRectangle(cornerRadius: CatLayout.avatarRadius))
+            } else {
+                fallbackAvatar
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var fallbackAvatar: some View {
         ZStack {
             RoundedRectangle(cornerRadius: CatLayout.avatarRadius)
                 .fill(bgColor.gradient)

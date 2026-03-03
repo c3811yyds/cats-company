@@ -3,6 +3,7 @@ package mysql
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/openchat/openchat/server/store/types"
 )
@@ -80,4 +81,82 @@ func (a *Adapter) GetMessages(topicID string, limit, offset int) ([]*types.Messa
 		msgs = append(msgs, m)
 	}
 	return msgs, rows.Err()
+}
+
+// GetLatestMessages returns the newest messages for a topic, but in ascending order for rendering.
+func (a *Adapter) GetLatestMessages(topicID string, limit, offset int) ([]*types.Message, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	rows, err := a.db.Query(
+		`SELECT id, topic_id, from_uid, content, msg_type, created_at
+		 FROM (
+		 	SELECT id, topic_id, from_uid, content, msg_type, created_at
+		 	FROM messages WHERE topic_id = ?
+		 	ORDER BY id DESC LIMIT ? OFFSET ?
+		 ) recent
+		 ORDER BY id ASC`,
+		topicID, limit, offset,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("get latest messages: %w", err)
+	}
+	defer rows.Close()
+
+	var msgs []*types.Message
+	for rows.Next() {
+		m := &types.Message{}
+		if err := rows.Scan(&m.ID, &m.TopicID, &m.FromUID, &m.Content, &m.MsgType, &m.CreatedAt); err != nil {
+			return nil, fmt.Errorf("scan latest message: %w", err)
+		}
+		msgs = append(msgs, m)
+	}
+	return msgs, rows.Err()
+}
+
+// GetLatestMessagesForTopics returns the newest persisted message for each topic.
+func (a *Adapter) GetLatestMessagesForTopics(topicIDs []string) (map[string]*types.Message, error) {
+	if len(topicIDs) == 0 {
+		return map[string]*types.Message{}, nil
+	}
+
+	placeholders := strings.TrimRight(strings.Repeat("?,", len(topicIDs)), ",")
+	args := make([]interface{}, 0, len(topicIDs)*2)
+	for _, topicID := range topicIDs {
+		args = append(args, topicID)
+	}
+	for _, topicID := range topicIDs {
+		args = append(args, topicID)
+	}
+
+	rows, err := a.db.Query(
+		fmt.Sprintf(
+			`SELECT m.id, m.topic_id, m.from_uid, m.content, m.msg_type, m.created_at
+			 FROM messages m
+			 JOIN (
+			 	SELECT topic_id, MAX(id) AS max_id
+			 	FROM messages
+			 	WHERE topic_id IN (%s)
+			 	GROUP BY topic_id
+			 ) latest ON latest.max_id = m.id
+			 WHERE m.topic_id IN (%s)`,
+			placeholders,
+			placeholders,
+		),
+		args...,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("get latest messages for topics: %w", err)
+	}
+	defer rows.Close()
+
+	latest := make(map[string]*types.Message, len(topicIDs))
+	for rows.Next() {
+		msg := &types.Message{}
+		if err := rows.Scan(&msg.ID, &msg.TopicID, &msg.FromUID, &msg.Content, &msg.MsgType, &msg.CreatedAt); err != nil {
+			return nil, fmt.Errorf("scan latest message for topic: %w", err)
+		}
+		latest[msg.TopicID] = msg
+	}
+	return latest, rows.Err()
 }

@@ -2,6 +2,7 @@ import SwiftUI
 
 struct ContactsView: View {
     @ObservedObject var auth = AuthManager.shared
+    @ObservedObject private var identities = IdentityStore.shared
     @State private var friends: [User] = []
     @State private var groups: [Group] = []
     @State private var pendingRequests: [FriendRequest] = []
@@ -36,7 +37,7 @@ struct ContactsView: View {
                         ForEach(groups) { group in
                             NavigationLink(value: group.topicId) {
                                 HStack(spacing: 12) {
-                                    AvatarView(name: group.name, isBot: false, isGroup: true, size: 40)
+                                    AvatarView(name: group.name, avatarURL: group.avatarUrl, isBot: false, isGroup: true, size: 40)
                                     Text(group.name)
                                 }
                             }
@@ -59,7 +60,7 @@ struct ContactsView: View {
                         let topicId = makeP2PTopicId(friend.id)
                         NavigationLink(value: topicId) {
                             HStack(spacing: 12) {
-                                AvatarView(name: friend.label, isBot: friend.isBot, isGroup: false, size: 40)
+                                AvatarView(name: friend.label, avatarURL: friend.avatarUrl, isBot: friend.isBot, isGroup: false, size: 40)
                                 VStack(alignment: .leading) {
                                     HStack {
                                         Text(friend.label)
@@ -111,6 +112,9 @@ struct ContactsView: View {
             .onReceive(NotificationCenter.default.publisher(for: .botDeleted)) { _ in
                 Task { await loadData() }
             }
+            .onReceive(NotificationCenter.default.publisher(for: .contactsDataChanged)) { _ in
+                Task { await loadData() }
+            }
         }
     }
 
@@ -122,6 +126,9 @@ struct ContactsView: View {
             friends = try await f
             groups = try await g
             pendingRequests = try await p
+            identities.upsertCurrentUser(auth.currentUser)
+            identities.upsertUsers(friends)
+            identities.upsertGroups(groups)
             isLoading = false
         } catch {
             print("Load contacts error: \(error)")

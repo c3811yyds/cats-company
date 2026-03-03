@@ -39,6 +39,13 @@ const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
 const crypto = __importStar(require("crypto"));
 const errors_1 = require("./errors");
+const IMAGE_MIME_TYPES = {
+    '.jpg': 'image/jpeg',
+    '.jpeg': 'image/jpeg',
+    '.png': 'image/png',
+    '.gif': 'image/gif',
+    '.webp': 'image/webp',
+};
 class FileUploader {
     httpBaseUrl;
     apiKey;
@@ -59,11 +66,12 @@ class FileUploader {
      */
     async uploadBuffer(buffer, filename, type = 'file') {
         const url = `${this.httpBaseUrl}/api/upload?type=${type}`;
+        const contentType = this.resolveContentType(filename, type);
         // Build multipart/form-data body manually for maximum compatibility
         const boundary = `----CatsBotBoundary${crypto.randomBytes(16).toString('hex')}`;
         const header = Buffer.from(`--${boundary}\r\n` +
             `Content-Disposition: form-data; name="file"; filename="${filename}"\r\n` +
-            `Content-Type: application/octet-stream\r\n\r\n`);
+            `Content-Type: ${contentType}\r\n\r\n`);
         const footer = Buffer.from(`\r\n--${boundary}--\r\n`);
         const body = Buffer.concat([header, buffer, footer]);
         let res;
@@ -85,6 +93,13 @@ class FileUploader {
             throw new errors_1.UploadError(`Upload failed (${res.status}): ${text}`, res.status);
         }
         return (await res.json());
+    }
+    resolveContentType(filename, type) {
+        if (type !== 'image') {
+            return 'application/octet-stream';
+        }
+        const ext = path.extname(filename).toLowerCase();
+        return IMAGE_MIME_TYPES[ext] ?? 'application/octet-stream';
     }
 }
 exports.FileUploader = FileUploader;

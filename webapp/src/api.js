@@ -35,6 +35,12 @@ export function getWebSocketURL() {
   return WS_URL;
 }
 
+export function resolveMediaURL(url) {
+  if (!url) return '';
+  if (/^https?:\/\//.test(url)) return url;
+  return `${API_BASE}${url}`;
+}
+
 export function isWSConnected() {
   return wsConnected;
 }
@@ -57,6 +63,9 @@ async function request(method, path, body) {
 export const api = {
   register: (data) => request('POST', '/api/auth/register', data),
   login: (data) => request('POST', '/api/auth/login', data),
+  getMe: () => request('GET', '/api/me'),
+  updateMe: (displayName, avatarUrl) =>
+    request('POST', '/api/me/update', { display_name: displayName, avatar_url: avatarUrl }),
 
   getFriends: () => request('GET', '/api/friends'),
   getPendingRequests: () => request('GET', '/api/friends/pending'),
@@ -78,8 +87,9 @@ export const api = {
     request('POST', '/api/messages/send', { topic_id: topicId, content, msg_type: 'text' }),
 
   // REST fallback for message history
-  getMessages: (topicId, limit, offset) =>
-    request('GET', `/api/messages?topic_id=${encodeURIComponent(topicId)}&limit=${limit || 50}&offset=${offset || 0}`),
+  getMessages: (topicId, limit, offset, latest = false) =>
+    request('GET', `/api/messages?topic_id=${encodeURIComponent(topicId)}&limit=${limit || 50}&offset=${offset || 0}${latest ? '&latest=1' : ''}`),
+  getConversations: () => request('GET', '/api/conversations'),
 
   getOnlineStatus: () => request('GET', '/api/users/online'),
 
@@ -87,6 +97,8 @@ export const api = {
   createGroup: (name, memberIds) => request('POST', '/api/groups/create', { name, member_ids: memberIds }),
   getGroups: () => request('GET', '/api/groups'),
   getGroupInfo: (groupId) => request('GET', `/api/groups/info?id=${groupId}`),
+  updateGroup: (groupId, name, avatarUrl) =>
+    request('POST', '/api/groups/update', { group_id: groupId, name, avatar_url: avatarUrl }),
   inviteToGroup: (groupId, userIds) => request('POST', '/api/groups/invite', { group_id: groupId, user_ids: userIds }),
   leaveGroup: (groupId) => request('POST', '/api/groups/leave', { group_id: groupId }),
   kickMember: (groupId, userId) => request('POST', '/api/groups/kick', { group_id: groupId, user_id: userId }),
@@ -110,6 +122,18 @@ export const api = {
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'Request failed');
+    return data;
+  },
+  uploadFile: async (file, type = 'file') => {
+    const formData = new FormData();
+    formData.append('file', file);
+    const res = await fetch(`${API_BASE}/api/upload?type=${type}`, {
+      method: 'POST',
+      headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+      body: formData,
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Upload failed');
     return data;
   },
 };

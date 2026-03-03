@@ -76,8 +76,15 @@ func (h *MessageHandler) HandleGetMessages(w http.ResponseWriter, r *http.Reques
 
 	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
 	offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))
+	latest := r.URL.Query().Get("latest") == "1" || r.URL.Query().Get("latest") == "true"
 
-	msgs, err := h.db.GetMessages(topicID, limit, offset)
+	var msgs interface{}
+	var err error
+	if latest {
+		msgs, err = h.db.GetLatestMessages(topicID, limit, offset)
+	} else {
+		msgs, err = h.db.GetMessages(topicID, limit, offset)
+	}
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to load messages"})
 		return

@@ -6,20 +6,33 @@ struct MessageBubble: View {
     let isMe: Bool
     var onReply: (() -> Void)?
 
+    @ObservedObject private var identities = IdentityStore.shared
     @State private var showImagePreview = false
     @State private var previewImageUrl: String?
+
+    private var senderName: String {
+        identities.displayName(forRawID: message.fromUid, fallback: message.fromUid)
+    }
+
+    private var senderAvatarURL: String? {
+        identities.avatarURL(forRawID: message.fromUid)
+    }
+
+    private var senderIsBot: Bool {
+        identities.isBot(forRawID: message.fromUid)
+    }
 
     var body: some View {
         HStack(alignment: .top, spacing: 8) {
             if isMe { Spacer(minLength: 60) }
 
             if !isMe {
-                AvatarView(name: message.fromUid, size: 32)
+                AvatarView(name: senderName, avatarURL: senderAvatarURL, isBot: senderIsBot, size: 32)
             }
 
             VStack(alignment: isMe ? .trailing : .leading, spacing: 4) {
                 if !isMe {
-                    Text(message.fromUid)
+                    Text(senderName)
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                 }
@@ -93,7 +106,7 @@ struct MessageBubble: View {
                     }
                 } else if rich.type == "file" {
                     FileContentView(rich: rich)
-                } else if rich.type == "link" || rich.type == "card" {
+                } else if rich.type == "link" || rich.type == "card" || rich.type == "link_preview" {
                     VStack(alignment: .leading, spacing: 4) {
                         if let title = rich.title {
                             Text(title).font(.subheadline.bold())
@@ -101,12 +114,15 @@ struct MessageBubble: View {
                         if let desc = rich.description {
                             Text(desc).font(.caption).lineLimit(2)
                         }
-                        if let imgUrl = rich.imageUrl, let url = URL(string: imgUrl) {
+                        if let imgUrl = rich.imageUrl {
+                            let fullUrl = imgUrl.hasPrefix("http") ? imgUrl : APIClient.shared.baseURL + imgUrl
+                            if let url = URL(string: fullUrl) {
                             AsyncImage(url: url) { image in
                                 image.resizable().scaledToFit()
                                     .frame(maxHeight: 120)
                                     .clipShape(RoundedRectangle(cornerRadius: 6))
                             } placeholder: { EmptyView() }
+                            }
                         }
                     }
                 } else {
@@ -116,12 +132,6 @@ struct MessageBubble: View {
             }
         }
     }
-
-    private func formatFileSize(_ bytes: Int) -> String {
-        if bytes < 1024 { return "\(bytes) B" }
-        if bytes < 1024 * 1024 { return "\(bytes / 1024) KB" }
-        return String(format: "%.1f MB", Double(bytes) / 1024.0 / 1024.0)
-    }
 }
 
 // MARK: - File Content View
@@ -129,9 +139,10 @@ struct MessageBubble: View {
 struct FileContentView: View {
     let rich: RichContent
     @State private var isDownloading = false
-    @State private var downloadProgress: Double = 0
     @State private var previewURL: URL?
-    @State private var showPreview = false
+    @State private var textPreview: TextPreviewFile?
+    @State private var sharedFile: SharedPreviewFile?
+    @State private var errorMessage: String?
 
     var body: some View {
         HStack(spacing: 12) {
@@ -160,40 +171,94 @@ struct FileContentView: View {
             Spacer()
 
             if isDownloading {
-                ProgressView(value: downloadProgress) {
-                    Text("\(Int(downloadProgress * 100))%")
-                        .font(.caption2)
-                }
-                .frame(width: 50)
+                ProgressView()
+                    .frame(width: 28, height: 28)
             } else {
-                Button {
+                HStack(spacing: 8) {
                     if isPreviewable {
-                        downloadAndPreview()
-                    } else {
-                        downloadFile()
+                        Button {
+                            openFile()
+                        } label: {
+                            Image(systemName: "eye.circle.fill")
+                                .font(.title2)
+                                .foregroundStyle(CatColor.primary)
+                        }
                     }
-                } label: {
-                    Image(systemName: isPreviewable ? "eye.circle.fill" : "arrow.down.circle.fill")
-                        .font(.title2)
-                        .foregroundStyle(CatColor.primary)
+
+                    Button {
+                        shareFile()
+                    } label: {
+                        Image(systemName: "arrow.down.circle.fill")
+                            .font(.title2)
+                            .foregroundStyle(CatColor.primary)
+                    }
                 }
             }
         }
         .frame(minWidth: 180, maxWidth: 240)
         .onTapGesture {
             if isPreviewable && !isDownloading {
-                downloadAndPreview()
+                openFile()
+            }
+        }
+        .contextMenu {
+            if isPreviewable {
+                Button {
+                    openFile()
+                } label: {
+                    Label("预览", systemImage: "eye")
+                }
+            }
+
+            Button {
+                shareFile()
+            } label: {
+                Label("下载/分享", systemImage: "square.and.arrow.down")
             }
         }
         .quickLookPreview($previewURL)
+        .sheet(item: $textPreview) { file in
+            TextFilePreviewSheet(file: file) {
+                sharedFile = SharedPreviewFile(url: file.url)
+            }
+        }
+        .sheet(item: $sharedFile) { item in
+            ShareSheet(items: [item.url])
+        }
+        .alert("文件打开失败", isPresented: Binding(
+            get: { errorMessage != nil },
+            set: { newValue in
+                if !newValue {
+                    errorMessage = nil
+                }
+            }
+        )) {
+            Button("知道了", role: .cancel) {}
+        } message: {
+            Text(errorMessage ?? "请稍后重试")
+        }
     }
 
     private var isPreviewable: Bool {
-        guard let name = rich.fileName?.lowercased() else { return false }
-        let exts = [".pdf", ".docx", ".doc", ".xlsx", ".xls",
-                    ".pptx", ".ppt", ".csv", ".rtf", ".txt",
-                    ".png", ".jpg", ".jpeg", ".gif", ".heic"]
-        return exts.contains(where: { name.hasSuffix($0) })
+        isTextPreviewable || isQuickLookPreviewable
+    }
+
+    private var fileExtension: String {
+        let name = rich.fileName ?? rich.url ?? ""
+        return URL(fileURLWithPath: name).pathExtension.lowercased()
+    }
+
+    private var isMarkdown: Bool {
+        ["md", "markdown"].contains(fileExtension)
+    }
+
+    private var isTextPreviewable: Bool {
+        ["md", "markdown", "txt", "json", "csv", "xml", "log", "yml", "yaml"].contains(fileExtension)
+    }
+
+    private var isQuickLookPreviewable: Bool {
+        ["pdf", "docx", "doc", "xlsx", "xls", "pptx", "ppt",
+         "rtf", "png", "jpg", "jpeg", "gif", "heic", "webp"].contains(fileExtension)
     }
 
     private var fileIcon: String {
@@ -205,7 +270,9 @@ struct FileContentView: View {
         if name.hasSuffix(".zip") || name.hasSuffix(".rar") { return "doc.zipper" }
         if name.hasSuffix(".mp3") || name.hasSuffix(".wav") { return "music.note" }
         if name.hasSuffix(".mp4") || name.hasSuffix(".mov") { return "video.fill" }
-        if name.hasSuffix(".txt") || name.hasSuffix(".rtf") { return "doc.plaintext.fill" }
+        if name.hasSuffix(".txt") || name.hasSuffix(".rtf") || name.hasSuffix(".md") || name.hasSuffix(".json") {
+            return "doc.plaintext.fill"
+        }
         return "doc.fill"
     }
 
@@ -230,45 +297,97 @@ struct FileContentView: View {
         return URL(string: full)
     }
 
-    private func downloadAndPreview() {
-        guard let url = resolveFullURL() else { return }
-        isDownloading = true
-
+    private func openFile() {
         Task {
-            do {
-                let (tempURL, _) = try await URLSession.shared.download(from: url)
-                let fileName = rich.fileName ?? url.lastPathComponent
-                let dest = FileManager.default.temporaryDirectory.appendingPathComponent(fileName)
-                try? FileManager.default.removeItem(at: dest)
-                try FileManager.default.moveItem(at: tempURL, to: dest)
-                isDownloading = false
-                previewURL = dest
-            } catch {
-                isDownloading = false
-                print("Preview download error: \(error)")
+            await withDownloadTask {
+                let localURL = try await ensureLocalFile()
+                if isTextPreviewable {
+                    textPreview = try buildTextPreview(from: localURL)
+                } else {
+                    previewURL = localURL
+                }
             }
         }
     }
 
-    private func downloadFile() {
-        guard let url = resolveFullURL() else { return }
-        isDownloading = true
-        downloadProgress = 0
-
+    private func shareFile() {
         Task {
-            do {
-                let (localURL, _) = try await URLSession.shared.download(from: url)
-                isDownloading = false
-                let activityVC = UIActivityViewController(activityItems: [localURL], applicationActivities: nil)
-                if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
-                   let rootVC = windowScene.windows.first?.rootViewController {
-                    rootVC.present(activityVC, animated: true)
-                }
-            } catch {
-                isDownloading = false
-                print("Download error: \(error)")
+            await withDownloadTask {
+                let localURL = try await ensureLocalFile()
+                sharedFile = SharedPreviewFile(url: localURL)
             }
         }
+    }
+
+    @MainActor
+    private func withDownloadTask(_ operation: @escaping () async throws -> Void) async {
+        guard !isDownloading else { return }
+        guard resolveFullURL() != nil else {
+            errorMessage = "文件地址缺失，当前消息还不能下载。"
+            return
+        }
+
+        isDownloading = true
+        defer { isDownloading = false }
+
+        do {
+            try await operation()
+        } catch {
+            errorMessage = error.localizedDescription
+            print("File open/share error: \(error)")
+        }
+    }
+
+    private func ensureLocalFile() async throws -> URL {
+        guard let remoteURL = resolveFullURL() else {
+            throw FilePreviewError.missingURL
+        }
+
+        let destinationURL = cachedFileURL(for: remoteURL)
+        let fileManager = FileManager.default
+        if fileManager.fileExists(atPath: destinationURL.path) {
+            return destinationURL
+        }
+
+        let directory = destinationURL.deletingLastPathComponent()
+        try fileManager.createDirectory(at: directory, withIntermediateDirectories: true, attributes: nil)
+
+        let (tempURL, _) = try await URLSession.shared.download(from: remoteURL)
+        if fileManager.fileExists(atPath: destinationURL.path) {
+            try fileManager.removeItem(at: destinationURL)
+        }
+        try fileManager.moveItem(at: tempURL, to: destinationURL)
+        return destinationURL
+    }
+
+    private func cachedFileURL(for remoteURL: URL) -> URL {
+        let cachesDir = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first
+            ?? FileManager.default.temporaryDirectory
+        let downloadsDir = cachesDir.appendingPathComponent("ChatDownloads", isDirectory: true)
+
+        let displayName = rich.fileName?.replacingOccurrences(of: "/", with: "_") ?? remoteURL.lastPathComponent
+        let displayURL = URL(fileURLWithPath: displayName)
+        let basename = displayURL.deletingPathExtension().lastPathComponent
+        let ext = displayURL.pathExtension
+        let uniquePrefix = remoteURL.deletingPathExtension().lastPathComponent
+        let finalName = ext.isEmpty ? "\(uniquePrefix)_\(basename)" : "\(uniquePrefix)_\(basename).\(ext)"
+
+        return downloadsDir.appendingPathComponent(finalName)
+    }
+
+    private func buildTextPreview(from localURL: URL) throws -> TextPreviewFile {
+        let data = try Data(contentsOf: localURL)
+        guard !data.isEmpty else {
+            throw FilePreviewError.emptyFile
+        }
+
+        let text = String(data: data, encoding: .utf8) ?? String(decoding: data, as: UTF8.self)
+        return TextPreviewFile(
+            title: rich.fileName ?? localURL.lastPathComponent,
+            text: text,
+            isMarkdown: isMarkdown,
+            url: localURL
+        )
     }
 }
 
@@ -313,4 +432,82 @@ struct ImagePreviewView: View {
             }
         }
     }
+}
+
+private struct TextPreviewFile: Identifiable {
+    let id = UUID()
+    let title: String
+    let text: String
+    let isMarkdown: Bool
+    let url: URL
+}
+
+private struct SharedPreviewFile: Identifiable {
+    let id = UUID()
+    let url: URL
+}
+
+private enum FilePreviewError: LocalizedError {
+    case missingURL
+    case emptyFile
+
+    var errorDescription: String? {
+        switch self {
+        case .missingURL:
+            return "文件链接还没解析出来，请重新进入会话后再试。"
+        case .emptyFile:
+            return "文件内容为空。"
+        }
+    }
+}
+
+private struct TextFilePreviewSheet: View {
+    let file: TextPreviewFile
+    let onShare: () -> Void
+
+    private var markdownContent: AttributedString? {
+        guard file.isMarkdown else { return nil }
+        return try? AttributedString(markdown: file.text)
+    }
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 0) {
+                    if let markdownContent {
+                        Text(markdownContent)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    } else {
+                        Text(file.text)
+                            .font(.system(.body, design: .monospaced))
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                }
+                .textSelection(.enabled)
+                .padding(16)
+            }
+            .background(CatColor.chatBg)
+            .navigationTitle(file.title)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
+                        onShare()
+                    } label: {
+                        Image(systemName: "square.and.arrow.up")
+                    }
+                }
+            }
+        }
+    }
+}
+
+private struct ShareSheet: UIViewControllerRepresentable {
+    let items: [Any]
+
+    func makeUIViewController(context: Context) -> UIActivityViewController {
+        UIActivityViewController(activityItems: items, applicationActivities: nil)
+    }
+
+    func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {}
 }

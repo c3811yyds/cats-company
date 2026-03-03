@@ -35,6 +35,13 @@ type GroupActionRequest struct {
 	Role    string  `json:"role,omitempty"`
 }
 
+// UpdateGroupRequest is the JSON body for updating group profile fields.
+type UpdateGroupRequest struct {
+	GroupID   int64  `json:"group_id"`
+	Name      string `json:"name"`
+	AvatarURL string `json:"avatar_url"`
+}
+
 // HandleCreateGroup handles POST /api/groups/create
 func (h *GroupHandler) HandleCreateGroup(w http.ResponseWriter, r *http.Request) {
 	uid := UIDFromContext(r.Context())
@@ -97,6 +104,49 @@ func (h *GroupHandler) HandleCreateGroup(w http.ResponseWriter, r *http.Request)
 		"group_id": groupID,
 		"topic":    topicID,
 		"name":     req.Name,
+	})
+}
+
+// HandleUpdateGroup handles POST /api/groups/update
+func (h *GroupHandler) HandleUpdateGroup(w http.ResponseWriter, r *http.Request) {
+	uid := UIDFromContext(r.Context())
+
+	var req UpdateGroupRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request"})
+		return
+	}
+
+	if req.GroupID == 0 || req.Name == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "group id and name required"})
+		return
+	}
+
+	role, err := h.db.GetMemberRole(req.GroupID, uid)
+	if err != nil || (role != "owner" && role != "admin") {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "only owner or admin can update group"})
+		return
+	}
+
+	if err := h.db.UpdateGroupProfile(req.GroupID, req.Name, req.AvatarURL); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to update group"})
+		return
+	}
+
+	group, err := h.db.GetGroup(req.GroupID)
+	if err != nil || group == nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to load updated group"})
+		return
+	}
+
+	h.notifyGroupEvent(req.GroupID, "group_updated", map[string]interface{}{
+		"group_id":   req.GroupID,
+		"name":       group.Name,
+		"avatar_url": group.AvatarURL,
+	})
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"group": group,
 	})
 }
 

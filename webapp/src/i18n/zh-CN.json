@@ -72,6 +72,8 @@
   "me_nickname": "昵称",
   "me_account": "账号",
   "me_qrcode": "我的二维码",
+  "me_profile_edit": "编辑个人资料",
+  "me_avatar_pick": "选择头像",
 
   "settings_title": "设置",
   "settings_notifications": "消息通知",
@@ -115,6 +117,11 @@
   "group_set_admin": "设为管理员",
   "group_select_members": "选择群成员",
   "group_no_groups": "暂无群聊",
+  "group_settings": "群设置",
+  "group_avatar_pick": "选择群头像",
+  "group_add_members": "添加成员",
+  "group_no_invitable_members": "没有可添加的好友",
+  "chat_load_older": "加载更早消息",
 
   "confirm_logout": "确定要退出登录吗？",
   "confirm_delete_friend": "确定要删除该好友吗？",
