@@ -41,7 +41,7 @@ Cats Company 是一个独立的即时通讯平台，提供：
 
 | 环境 | HTTP API | WebSocket |
 |------|----------|-----------|
-| 生产 | `http://118.145.116.152:6061` | `ws://118.145.116.152:6061/v0/channels` |
+| 生产 | `http://118.145.116.152` | `ws://118.145.116.152/v0/channels` |
 | 本地 | `http://localhost:6061` | `ws://localhost:6061/v0/channels` |
 
 ---
@@ -269,7 +269,7 @@ REST 备用通道（推荐使用 WebSocket）。
 ### 3.1 连接
 
 ```
-ws://118.145.116.152:6061/v0/channels?api_key=<api_key>
+ws://118.145.116.152/v0/channels?api_key=<api_key>
 ```
 
 用户连接使用 `?token=<jwt>`，Bot 连接使用 `?api_key=<key>`。
@@ -467,7 +467,7 @@ npm install @catscompany/bot-sdk
 
 | 方法 | 说明 |
 |------|------|
-| `new CatsBot(config)` | 初始化，传入 `serverUrl` 和 `apiKey` |
+| `new CatsBot(config)` | 初始化，传入 `serverUrl`、`apiKey`，可选 `connectTimeout` / `handshakeTimeout` |
 | `connect()` | 建立 WebSocket 连接并完成握手 |
 | `run()` | connect + 保持连接（含自动重连） |
 | `disconnect()` | 断开连接 |
@@ -514,8 +514,10 @@ npm install @catscompany/bot-sdk
 import { CatsBot } from '@catscompany/bot-sdk';
 
 const bot = new CatsBot({
-  serverUrl: 'ws://118.145.116.152:6061/v0/channels',
+  serverUrl: 'ws://118.145.116.152/v0/channels',
   apiKey: 'cc_0a_your_api_key_here',
+  connectTimeout: 15000,
+  handshakeTimeout: 10000,
 });
 
 bot.on('ready', (uid) => {
@@ -542,6 +544,13 @@ bot.on('message', async (ctx) => {
 bot.run();
 ```
 
+说明：
+
+- 外部 Bot 建议统一连接 nginx 暴露的入口：`ws://118.145.116.152/v0/channels`
+- `connectTimeout` 控制 TCP/WebSocket 建连阶段超时
+- `handshakeTimeout` 控制 `hi -> ctrl` 握手阶段超时
+- 如果升级请求在握手前被 HTTP 拒绝，SDK 会直接抛出带 `statusCode` 的 `HandshakeError`
+
 ### 4.3 Go SDK
 
 ```go
@@ -554,7 +563,7 @@ import (
 
 func main() {
     b := bot.New(bot.Config{
-        ServerURL: "ws://118.145.116.152:6061/v0/channels",
+        ServerURL: "ws://118.145.116.152/v0/channels",
         APIKey:    "cc_0a_your_api_key_here",
     })
 
@@ -580,7 +589,7 @@ import json
 import websocket
 
 API_KEY = "cc_0a_your_api_key_here"
-WS_URL = f"ws://118.145.116.152:6061/v0/channels?api_key={API_KEY}"
+WS_URL = f"ws://118.145.116.152/v0/channels?api_key={API_KEY}"
 
 ws = websocket.create_connection(WS_URL)
 
@@ -618,7 +627,7 @@ while True:
         → 用户在 App/Web 中搜索你的 Bot username 并添加
 
 步骤 3: 你的服务连接 WebSocket
-        → ws://118.145.116.152:6061/v0/channels?api_key=<your_key>
+        → ws://118.145.116.152/v0/channels?api_key=<your_key>
         → 完成握手
 
 步骤 4: 收发消息

@@ -15,9 +15,12 @@ export class ConnectionError extends CatsBotError {
 }
 
 export class HandshakeError extends CatsBotError {
-  constructor(message: string) {
+  public readonly statusCode?: number;
+
+  constructor(message: string, statusCode?: number) {
     super(message);
     this.name = 'HandshakeError';
+    this.statusCode = statusCode;
   }
 }
 

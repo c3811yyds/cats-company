@@ -206,6 +206,10 @@ export interface CatsBotConfig {
   httpBaseUrl?: string;
   /** Delay in ms before reconnecting after disconnect. Default: 3000 */
   reconnectDelay?: number;
+  /** Timeout in ms for establishing the TCP/WebSocket connection. Default: 15000 */
+  connectTimeout?: number;
+  /** Timeout in ms for waiting on the server's hi/ctrl handshake. Default: 10000 */
+  handshakeTimeout?: number;
   /** Timeout in ms for server pings before forcing reconnect. Default: 70000 */
   pingTimeout?: number;
 }

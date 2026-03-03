@@ -17,9 +17,11 @@ class ConnectionError extends CatsBotError {
 }
 exports.ConnectionError = ConnectionError;
 class HandshakeError extends CatsBotError {
-    constructor(message) {
+    statusCode;
+    constructor(message, statusCode) {
         super(message);
         this.name = 'HandshakeError';
+        this.statusCode = statusCode;
     }
 }
 exports.HandshakeError = HandshakeError;

@@ -5,7 +5,8 @@ export declare class ConnectionError extends CatsBotError {
     constructor(message: string);
 }
 export declare class HandshakeError extends CatsBotError {
-    constructor(message: string);
+    readonly statusCode?: number;
+    constructor(message: string, statusCode?: number);
 }
 export declare class ProtocolError extends CatsBotError {
     readonly code: number;

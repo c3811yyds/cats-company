@@ -41,6 +41,22 @@ export class CatsBot {
   private closed = false;
   private pingTimer: ReturnType<typeof setTimeout> | null = null;
 
+  private closeSocket(reason = 'bot disconnect'): void {
+    if (!this.ws) return;
+
+    const ws = this.ws;
+    this.ws = null;
+
+    if (ws.readyState === WebSocket.CONNECTING) {
+      ws.terminate();
+      return;
+    }
+
+    if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CLOSING) {
+      ws.close(1000, reason);
+    }
+  }
+
   constructor(config: CatsBotConfig) {
     const httpBase = config.httpBaseUrl ?? deriveHttpBase(config.serverUrl);
     this.config = {
@@ -48,6 +64,8 @@ export class CatsBot {
       apiKey: config.apiKey,
       httpBaseUrl: httpBase,
       reconnectDelay: config.reconnectDelay ?? 3000,
+      connectTimeout: config.connectTimeout ?? 15000,
+      handshakeTimeout: config.handshakeTimeout ?? 10000,
       pingTimeout: config.pingTimeout ?? 70000,
     };
     this.uploader = new FileUploader(this.config.httpBaseUrl, this.config.apiKey);
@@ -71,6 +89,9 @@ export class CatsBot {
   }
 
   private emit<K extends keyof BotEventMap>(event: K, ...args: Parameters<BotEventMap[K]>): void {
+    if (event === 'error' && this.emitter.listenerCount('error') === 0) {
+      return;
+    }
     this.emitter.emit(event, ...args);
   }
 
@@ -105,10 +126,7 @@ export class CatsBot {
     this.closed = true;
     this.clearPingTimer();
     this.rejectAllPending(new ConnectionError('Disconnected'));
-    if (this.ws) {
-      this.ws.close(1000, 'bot disconnect');
-      this.ws = null;
-    }
+    this.closeSocket('bot disconnect');
   }
 
   // --- Sending messages ---
@@ -309,6 +327,27 @@ export class CatsBot {
   private doConnect(): Promise<void> {
     return new Promise<void>((resolve, reject) => {
       let handshakeDone = false;
+      let socketOpen = false;
+      let connectTimer: ReturnType<typeof setTimeout> | null = null;
+      let handshakeTimer: ReturnType<typeof setTimeout> | null = null;
+
+      const clearConnectTimers = (): void => {
+        if (connectTimer) {
+          clearTimeout(connectTimer);
+          connectTimer = null;
+        }
+        if (handshakeTimer) {
+          clearTimeout(handshakeTimer);
+          handshakeTimer = null;
+        }
+      };
+
+      const failConnect = (err: Error): void => {
+        if (handshakeDone) return;
+        handshakeDone = true;
+        clearConnectTimers();
+        reject(err);
+      };
 
       try {
         this.ws = new WebSocket(this.config.serverUrl, {
@@ -319,18 +358,30 @@ export class CatsBot {
         return;
       }
 
-      const handshakeTimeout = setTimeout(() => {
-        if (!handshakeDone) {
-          handshakeDone = true;
-          this.ws?.close();
-          reject(new HandshakeError('Handshake timed out'));
-        }
-      }, 10000);
+      connectTimer = setTimeout(() => {
+        failConnect(new ConnectionError('WebSocket connection timed out'));
+        this.closeSocket('connect timeout');
+      }, this.config.connectTimeout);
 
       this.ws.on('open', () => {
+        socketOpen = true;
+        if (connectTimer) {
+          clearTimeout(connectTimer);
+          connectTimer = null;
+        }
+
+        handshakeTimer = setTimeout(() => {
+          failConnect(new HandshakeError('Handshake timed out'));
+          this.closeSocket('handshake timeout');
+        }, this.config.handshakeTimeout);
+
         // Send handshake
         const id = this.nextId();
-        this.sendRaw({ hi: { id, ver: '0.1.0' } });
+        try {
+          this.sendRaw({ hi: { id, ver: '0.1.0' } });
+        } catch (err: any) {
+          failConnect(new ConnectionError(err.message));
+        }
       });
 
       this.ws.on('message', (raw: WebSocket.Data) => {
@@ -350,7 +401,7 @@ export class CatsBot {
             (msg.ctrl.params as any)?.build === 'catscompany'
           ) {
             handshakeDone = true;
-            clearTimeout(handshakeTimeout);
+            clearConnectTimers();
             this.uid = String((msg.ctrl.params as any)?.uid ?? '');
             this.name = String((msg.ctrl.params as any)?.name ?? '');
             this.reconnectAttempt = 0;
@@ -358,9 +409,7 @@ export class CatsBot {
             resolve();
             return;
           } else {
-            handshakeDone = true;
-            clearTimeout(handshakeTimeout);
-            reject(new HandshakeError(`Handshake failed: code ${msg.ctrl.code}`));
+            failConnect(new HandshakeError(`Handshake failed: code ${msg.ctrl.code}`));
             return;
           }
         }
@@ -368,11 +417,24 @@ export class CatsBot {
         this.dispatch(msg);
       });
 
+      this.ws.on('unexpected-response', (_req, res) => {
+        const status = res.statusCode ?? 0;
+        failConnect(new HandshakeError(`WebSocket upgrade rejected with HTTP ${status}`, status));
+        res.resume();
+      });
+
       this.ws.on('close', (code: number, reason: Buffer) => {
-        clearTimeout(handshakeTimeout);
+        clearConnectTimers();
         this.clearPingTimer();
         this.rejectAllPending(new ConnectionError('Connection closed'));
         this.emit('disconnect', code, reason.toString());
+
+        if (!handshakeDone) {
+          const message = socketOpen
+            ? 'Connection closed during handshake'
+            : 'WebSocket was closed before the connection was established';
+          failConnect(new ConnectionError(message));
+        }
 
         if (!this.closed) {
           this.scheduleReconnect();
@@ -380,11 +442,14 @@ export class CatsBot {
       });
 
       this.ws.on('error', (err: Error) => {
-        this.emit('error', err);
+        if (this.closed && !handshakeDone) {
+          return;
+        }
+        if (this.emitter.listenerCount('error') > 0) {
+          this.emit('error', err);
+        }
         if (!handshakeDone) {
-          handshakeDone = true;
-          clearTimeout(handshakeTimeout);
-          reject(new ConnectionError(err.message));
+          failConnect(new ConnectionError(err.message));
         }
       });
 

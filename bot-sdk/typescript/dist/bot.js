@@ -22,6 +22,19 @@ class CatsBot {
     reconnectAttempt = 0;
     closed = false;
     pingTimer = null;
+    closeSocket(reason = 'bot disconnect') {
+        if (!this.ws)
+            return;
+        const ws = this.ws;
+        this.ws = null;
+        if (ws.readyState === ws_1.default.CONNECTING) {
+            ws.terminate();
+            return;
+        }
+        if (ws.readyState === ws_1.default.OPEN || ws.readyState === ws_1.default.CLOSING) {
+            ws.close(1000, reason);
+        }
+    }
     constructor(config) {
         const httpBase = config.httpBaseUrl ?? deriveHttpBase(config.serverUrl);
         this.config = {
@@ -29,6 +42,8 @@ class CatsBot {
             apiKey: config.apiKey,
             httpBaseUrl: httpBase,
             reconnectDelay: config.reconnectDelay ?? 3000,
+            connectTimeout: config.connectTimeout ?? 15000,
+            handshakeTimeout: config.handshakeTimeout ?? 10000,
             pingTimeout: config.pingTimeout ?? 70000,
         };
         this.uploader = new uploader_1.FileUploader(this.config.httpBaseUrl, this.config.apiKey);
@@ -47,6 +62,9 @@ class CatsBot {
         return this;
     }
     emit(event, ...args) {
+        if (event === 'error' && this.emitter.listenerCount('error') === 0) {
+            return;
+        }
         this.emitter.emit(event, ...args);
     }
     // --- Connection lifecycle ---
@@ -78,10 +96,7 @@ class CatsBot {
         this.closed = true;
         this.clearPingTimer();
         this.rejectAllPending(new errors_1.ConnectionError('Disconnected'));
-        if (this.ws) {
-            this.ws.close(1000, 'bot disconnect');
-            this.ws = null;
-        }
+        this.closeSocket('bot disconnect');
     }
     // --- Sending messages ---
     /**
@@ -247,6 +262,26 @@ class CatsBot {
     doConnect() {
         return new Promise((resolve, reject) => {
             let handshakeDone = false;
+            let socketOpen = false;
+            let connectTimer = null;
+            let handshakeTimer = null;
+            const clearConnectTimers = () => {
+                if (connectTimer) {
+                    clearTimeout(connectTimer);
+                    connectTimer = null;
+                }
+                if (handshakeTimer) {
+                    clearTimeout(handshakeTimer);
+                    handshakeTimer = null;
+                }
+            };
+            const failConnect = (err) => {
+                if (handshakeDone)
+                    return;
+                handshakeDone = true;
+                clearConnectTimers();
+                reject(err);
+            };
             try {
                 this.ws = new ws_1.default(this.config.serverUrl, {
                     headers: { 'X-API-Key': this.config.apiKey },
@@ -256,17 +291,28 @@ class CatsBot {
                 reject(new errors_1.ConnectionError(`Failed to create WebSocket: ${err.message}`));
                 return;
             }
-            const handshakeTimeout = setTimeout(() => {
-                if (!handshakeDone) {
-                    handshakeDone = true;
-                    this.ws?.close();
-                    reject(new errors_1.HandshakeError('Handshake timed out'));
-                }
-            }, 10000);
+            connectTimer = setTimeout(() => {
+                failConnect(new errors_1.ConnectionError('WebSocket connection timed out'));
+                this.closeSocket('connect timeout');
+            }, this.config.connectTimeout);
             this.ws.on('open', () => {
+                socketOpen = true;
+                if (connectTimer) {
+                    clearTimeout(connectTimer);
+                    connectTimer = null;
+                }
+                handshakeTimer = setTimeout(() => {
+                    failConnect(new errors_1.HandshakeError('Handshake timed out'));
+                    this.closeSocket('handshake timeout');
+                }, this.config.handshakeTimeout);
                 // Send handshake
                 const id = this.nextId();
-                this.sendRaw({ hi: { id, ver: '0.1.0' } });
+                try {
+                    this.sendRaw({ hi: { id, ver: '0.1.0' } });
+                }
+                catch (err) {
+                    failConnect(new errors_1.ConnectionError(err.message));
+                }
             });
             this.ws.on('message', (raw) => {
                 this.resetPingTimer();
@@ -282,7 +328,7 @@ class CatsBot {
                     if (msg.ctrl.code === 200 &&
                         msg.ctrl.params?.build === 'catscompany') {
                         handshakeDone = true;
-                        clearTimeout(handshakeTimeout);
+                        clearConnectTimers();
                         this.uid = String(msg.ctrl.params?.uid ?? '');
                         this.name = String(msg.ctrl.params?.name ?? '');
                         this.reconnectAttempt = 0;
@@ -291,29 +337,41 @@ class CatsBot {
                         return;
                     }
                     else {
-                        handshakeDone = true;
-                        clearTimeout(handshakeTimeout);
-                        reject(new errors_1.HandshakeError(`Handshake failed: code ${msg.ctrl.code}`));
+                        failConnect(new errors_1.HandshakeError(`Handshake failed: code ${msg.ctrl.code}`));
                         return;
                     }
                 }
                 this.dispatch(msg);
             });
+            this.ws.on('unexpected-response', (_req, res) => {
+                const status = res.statusCode ?? 0;
+                failConnect(new errors_1.HandshakeError(`WebSocket upgrade rejected with HTTP ${status}`, status));
+                res.resume();
+            });
             this.ws.on('close', (code, reason) => {
-                clearTimeout(handshakeTimeout);
+                clearConnectTimers();
                 this.clearPingTimer();
                 this.rejectAllPending(new errors_1.ConnectionError('Connection closed'));
                 this.emit('disconnect', code, reason.toString());
+                if (!handshakeDone) {
+                    const message = socketOpen
+                        ? 'Connection closed during handshake'
+                        : 'WebSocket was closed before the connection was established';
+                    failConnect(new errors_1.ConnectionError(message));
+                }
                 if (!this.closed) {
                     this.scheduleReconnect();
                 }
             });
             this.ws.on('error', (err) => {
-                this.emit('error', err);
+                if (this.closed && !handshakeDone) {
+                    return;
+                }
+                if (this.emitter.listenerCount('error') > 0) {
+                    this.emit('error', err);
+                }
                 if (!handshakeDone) {
-                    handshakeDone = true;
-                    clearTimeout(handshakeTimeout);
-                    reject(new errors_1.ConnectionError(err.message));
+                    failConnect(new errors_1.ConnectionError(err.message));
                 }
             });
             this.ws.on('ping', () => {

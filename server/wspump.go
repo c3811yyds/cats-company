@@ -84,7 +84,7 @@ func (h *Hub) disconnectClient(client *Client, reason string) {
 		log.Printf("client disconnected: uid=%d (%s, devices: %d, online users: %d)", client.uid, reason, remaining, onlineUsers)
 	}
 	if lastConn {
-		h.broadcastPresence(client.uid, "off")
+		h.enqueuePresence(client.uid, "off")
 	}
 }
 

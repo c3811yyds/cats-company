@@ -128,8 +128,10 @@ npm install @catscompany/bot-sdk
 import { CatsBot } from '@catscompany/bot-sdk';
 
 const bot = new CatsBot({
-  serverUrl: 'ws://118.145.116.152:6061/v0/channels',
+  serverUrl: 'ws://118.145.116.152/v0/channels',
   apiKey: '<你的bot api_key>',
+  connectTimeout: 15000,
+  handshakeTimeout: 10000,
 });
 
 bot.on('ready', (uid) => {
@@ -149,6 +151,12 @@ bot.on('error', (err) => {
 
 bot.connect();
 ```
+
+说明：
+
+- 外部 Bot 建议统一走 `ws://118.145.116.152/v0/channels`，不要直接依赖 `:6061`
+- `connectTimeout` 是建连超时，`handshakeTimeout` 是握手超时
+- 如果 API key 无效或升级被拒绝，SDK 会直接返回明确错误，而不是统一表现成握手超时
 
 ---
 

@@ -11,6 +11,7 @@ export declare class CatsBot {
     private reconnectAttempt;
     private closed;
     private pingTimer;
+    private closeSocket;
     constructor(config: CatsBotConfig);
     on<K extends keyof BotEventMap>(event: K, listener: BotEventMap[K]): this;
     off<K extends keyof BotEventMap>(event: K, listener: BotEventMap[K]): this;

@@ -28,10 +28,16 @@ type Hub struct {
 	clients     map[int64]map[*Client]struct{}
 	register    chan *Client
 	unregister  chan *Client
+	presence    chan presenceEvent
 	db          *mysql.Adapter
 	rateLimiter *RateLimiter
 	botStats    *BotStats
 	botConvo    botConvoTracker
+}
+
+type presenceEvent struct {
+	uid  int64
+	what string
 }
 
 // Client represents a single WebSocket connection.
@@ -39,6 +45,7 @@ type Client struct {
 	hub         *Hub
 	conn        *websocket.Conn
 	uid         int64
+	displayName string
 	accountType types.AccountType
 	send        chan []byte
 	sendMu      sync.RWMutex
@@ -47,15 +54,18 @@ type Client struct {
 
 // NewHub creates a new Hub.
 func NewHub(db *mysql.Adapter, rl *RateLimiter) *Hub {
-	return &Hub{
+	hub := &Hub{
 		clients:     make(map[int64]map[*Client]struct{}),
-		register:    make(chan *Client),
-		unregister:  make(chan *Client),
+		register:    make(chan *Client, 256),
+		unregister:  make(chan *Client, 256),
+		presence:    make(chan presenceEvent, 256),
 		db:          db,
 		rateLimiter: rl,
 		botStats:    NewBotStats(),
 		botConvo:    botConvoTracker{counters: make(map[string]*botConvoCount)},
 	}
+	go hub.runPresence()
+	return hub
 }
 
 // BotStats returns the hub's bot stats tracker.
@@ -71,7 +81,7 @@ func (h *Hub) Run() {
 			firstConn, deviceCount, onlineUsers := h.addClient(client)
 			log.Printf("client connected: uid=%d (devices: %d, online users: %d)", client.uid, deviceCount, onlineUsers)
 			if firstConn {
-				h.broadcastPresence(client.uid, "on")
+				h.enqueuePresence(client.uid, "on")
 			}
 
 		case client := <-h.unregister:
@@ -82,7 +92,7 @@ func (h *Hub) Run() {
 			client.closeSend()
 			log.Printf("client disconnected: uid=%d (devices: %d, online users: %d)", client.uid, remaining, onlineUsers)
 			if lastConn {
-				h.broadcastPresence(client.uid, "off")
+				h.enqueuePresence(client.uid, "off")
 			}
 		}
 	}
@@ -146,6 +156,9 @@ func (h *Hub) removeClient(client *Client) (removed bool, lastConn bool, remaini
 
 // broadcastPresence notifies all friends of a user's online/offline status.
 func (h *Hub) broadcastPresence(uid int64, what string) {
+	if h.db == nil {
+		return
+	}
 	friends, err := h.db.GetFriends(uid)
 	if err != nil {
 		log.Printf("presence: failed to get friends for uid=%d: %v", uid, err)
@@ -163,9 +176,25 @@ func (h *Hub) broadcastPresence(uid int64, what string) {
 	}
 }
 
+func (h *Hub) enqueuePresence(uid int64, what string) {
+	select {
+	case h.presence <- presenceEvent{uid: uid, what: what}:
+	default:
+		go h.broadcastPresence(uid, what)
+	}
+}
+
+func (h *Hub) runPresence() {
+	for evt := range h.presence {
+		h.broadcastPresence(evt.uid, evt.what)
+	}
+}
+
 // ServeWS handles WebSocket upgrade requests with JWT or API Key authentication.
 func ServeWS(hub *Hub, w http.ResponseWriter, r *http.Request) {
 	var uid int64
+	acctType := types.AccountHuman
+	displayName := ""
 
 	// Try JWT token first
 	tokenStr := r.URL.Query().Get("token")
@@ -181,6 +210,7 @@ func ServeWS(hub *Hub, w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		uid = claims.UID
+		displayName = claims.Username
 	} else if apiKeyStr != "" {
 		// API Key authentication for bots
 		parsedUID, err := ParseAPIKey(apiKeyStr)
@@ -195,16 +225,20 @@ func ServeWS(hub *Hub, w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		uid = parsedUID
+		acctType = types.AccountBot
 	} else {
 		http.Error(w, "missing token or api_key", http.StatusUnauthorized)
 		return
 	}
 
-	// Look up account type for rate limiting
-	usr, _ := hub.db.GetUser(uid)
-	acctType := types.AccountHuman
-	if usr != nil {
-		acctType = usr.AccountType
+	if tokenStr != "" {
+		usr, _ := hub.db.GetUser(uid)
+		if usr != nil {
+			acctType = usr.AccountType
+			if usr.DisplayName != "" {
+				displayName = usr.DisplayName
+			}
+		}
 	}
 
 	conn, err := upgrader.Upgrade(w, r, nil)
@@ -217,6 +251,7 @@ func ServeWS(hub *Hub, w http.ResponseWriter, r *http.Request) {
 		hub:         hub,
 		conn:        conn,
 		uid:         uid,
+		displayName: displayName,
 		accountType: acctType,
 		send:        make(chan []byte, 256),
 	}
@@ -237,12 +272,7 @@ func (h *Hub) handleMessage(client *Client, msg *ClientMessage) {
 	case msg.Note != nil:
 		h.handleNote(client, msg.Note)
 	case msg.Hi != nil:
-		usr, _ := h.db.GetUser(client.uid)
-		var displayName string
-		if usr != nil {
-			displayName = usr.DisplayName
-		}
-		h.handleHi(client, displayName, msg.Hi)
+		h.handleHi(client, client.displayName, msg.Hi)
 	case msg.Get != nil:
 		h.handleGet(client, msg.Get)
 	}
