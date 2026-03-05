@@ -34,6 +34,7 @@ struct ChatDetailView: View {
     @State private var historyOffset = 0
     @State private var hasMoreHistory = false
     @State private var isLoadingOlder = false
+    @State private var messageListRefreshID = 0
     @FocusState private var isComposerFocused: Bool
 
     private let pageSize = 200
@@ -53,165 +54,60 @@ struct ChatDetailView: View {
 
     var body: some View {
         ScrollViewReader { proxy in
-            VStack(spacing: 0) {
-                // Messages
-                ScrollView {
-                    LazyVStack(spacing: 8) {
-                        if hasMoreHistory {
-                            Button {
-                                Task { await loadOlderMessages() }
-                            } label: {
-                                HStack(spacing: 6) {
-                                    if isLoadingOlder {
-                                        ProgressView()
-                                            .scaleEffect(0.8)
-                                    }
-                                    Text(isLoadingOlder ? "加载中..." : "加载更早消息")
-                                        .font(.caption)
-                                        .foregroundStyle(CatColor.primary)
-                                }
-                                .frame(maxWidth: .infinity)
-                                .padding(.vertical, 8)
-                            }
-                            .disabled(isLoadingOlder)
-                        }
-
-                        ForEach(Array(messages.enumerated()), id: \.element.seq) { index, msg in
-                            // Date separator
-                            if let ts = msg.timestamp, shouldShowDate(at: index) {
-                                DateSeparator(date: ts)
-                            }
-
-                            MessageBubble(
-                                message: msg,
-                                isMe: msg.fromUid == String(auth.currentUser?.id ?? 0),
-                                onReply: { replyTo = msg }
-                            )
-                            .id(msg.seq)
-                        }
-
-                        Color.clear
-                            .frame(height: 1)
-                            .id(bottomAnchorID)
-                    }
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 8)
-                }
-                .background(CatColor.chatBg)
-                .defaultScrollAnchor(.bottom)
-                .scrollDismissesKeyboard(.interactively)
-                .onTapGesture {
-                    hideKeyboard()
-                }
-
-                // Typing indicator
-                if typingUser != nil {
-                    HStack(spacing: 4) {
-                        TypingDotsView()
-                        Text("\(resolvedTitle) 正在输入...")
-                            .font(.caption)
-                            .foregroundStyle(CatColor.textSecondary)
-                        Spacer()
-                    }
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 4)
-                    .background(CatColor.chatBg)
-                    .transition(.opacity)
-                }
-
-                // Reply preview
-                if let reply = replyTo {
-                    HStack {
-                        RoundedRectangle(cornerRadius: 2)
-                            .fill(CatColor.primary)
-                            .frame(width: 3)
-                        VStack(alignment: .leading) {
-                            Text("回复")
-                                .font(.caption.bold())
-                                .foregroundStyle(CatColor.primary)
-                            Text(reply.content.displayText)
-                                .font(.caption)
-                                .lineLimit(1)
-                        }
-                        Spacer()
-                        Button { replyTo = nil } label: {
-                            Image(systemName: "xmark.circle.fill")
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 6)
-                    .background(CatColor.secondaryBg)
-                }
-
-                // Input bar
-                VStack(spacing: 0) {
-                    CatColor.border
-                        .frame(height: 0.5)
-
-                    // Upload progress
-                    if isUploading {
-                        HStack(spacing: 6) {
-                            ProgressView()
-                                .scaleEffect(0.8)
-                            Text("正在上传...")
-                                .font(.caption)
-                                .foregroundStyle(CatColor.textSecondary)
-                            Spacer()
-                        }
-                        .padding(.horizontal, 16)
-                        .padding(.vertical, 4)
-                    }
-
-                    HStack(spacing: 8) {
-                        // Attachment button
-                        Menu {
-                            Button {
-                                showPhotoPicker = true
-                            } label: {
-                                Label("相册", systemImage: "photo.on.rectangle")
-                            }
-                            Button {
-                                showDocumentPicker = true
-                            } label: {
-                                Label("文件", systemImage: "doc")
-                            }
-                        } label: {
-                            Image(systemName: "plus.circle.fill")
-                                .font(.title2)
-                                .foregroundStyle(CatColor.primary)
-                        }
-                        .disabled(isUploading)
-
-                        TextField("输入消息...", text: $inputText, axis: .vertical)
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 8)
-                            .lineLimit(1...5)
-                            .background(CatColor.background)
-                            .clipShape(RoundedRectangle(cornerRadius: CatLayout.avatarRadius))
-                            .focused($isComposerFocused)
-                            .onChange(of: inputText) {
-                                ws.sendTyping(topic: topicId)
-                            }
-
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 8) {
+                    if hasMoreHistory {
                         Button {
-                            Task { await sendMessage() }
+                            Task { await loadOlderMessages() }
                         } label: {
-                            Image(systemName: "arrow.up.circle.fill")
-                                .font(.title2)
-                                .foregroundStyle(
-                                    inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                                        ? Color.gray.opacity(0.4)
-                                        : CatColor.primary
-                                )
+                            HStack(spacing: 6) {
+                                if isLoadingOlder {
+                                    ProgressView()
+                                        .scaleEffect(0.8)
+                                }
+                                Text(isLoadingOlder ? "加载中..." : "加载更早消息")
+                                    .font(.caption)
+                                    .foregroundStyle(CatColor.primary)
+                            }
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 8)
                         }
-                        .disabled(inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                        .disabled(isLoadingOlder)
                     }
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 8)
+
+                    ForEach(Array(messages.enumerated()), id: \.element.seq) { index, msg in
+                        // Date separator
+                        if let ts = msg.timestamp, shouldShowDate(at: index) {
+                            DateSeparator(date: ts)
+                        }
+
+                        MessageBubble(
+                            message: msg,
+                            isMe: msg.fromUid == String(auth.currentUser?.id ?? 0),
+                            onReply: { replyTo = msg }
+                        )
+                        .id(msg.seq)
+                    }
+
+                    Color.clear
+                        .frame(height: 1)
+                        .id(bottomAnchorID)
                 }
-                .background(CatColor.cardBg)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .id(messageListRefreshID)
             }
+            .contentShape(Rectangle())
+            .background(CatColor.chatBg)
+            .scrollDismissesKeyboard(.interactively)
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                composerArea
+            }
+            .onTapGesture {
+                hideKeyboard()
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             .navigationTitle(resolvedTitle)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -256,17 +152,14 @@ struct ChatDetailView: View {
                 scrollToBottom(proxy)
             }
             .onChange(of: isComposerFocused) {
-                guard isComposerFocused else { return }
-                scrollToBottom(proxy, animated: false)
-                scheduleScrollToBottom(proxy)
+                refreshMessageListLayout(proxy, keepBottomVisible: isComposerFocused)
             }
             .onChange(of: replyTo?.seq) {
                 guard replyTo != nil else { return }
                 scrollToBottom(proxy)
             }
             .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillChangeFrameNotification)) { _ in
-                guard isComposerFocused else { return }
-                scheduleScrollToBottom(proxy)
+                refreshMessageListLayout(proxy, keepBottomVisible: isComposerFocused)
             }
             .sheet(isPresented: $showDocumentPicker) {
                 DocumentPickerView { urls in
@@ -294,6 +187,117 @@ struct ChatDetailView: View {
             } message: {
                 Text(attachmentErrorMessage ?? "请稍后重试")
             }
+        }
+    }
+
+    private var composerArea: some View {
+        VStack(spacing: 0) {
+            // Typing indicator
+            if typingUser != nil {
+                HStack(spacing: 4) {
+                    TypingDotsView()
+                    Text("\(resolvedTitle) 正在输入...")
+                        .font(.caption)
+                        .foregroundStyle(CatColor.textSecondary)
+                    Spacer()
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 4)
+                .background(CatColor.chatBg)
+                .transition(.opacity)
+            }
+
+            // Reply preview
+            if let reply = replyTo {
+                HStack {
+                    RoundedRectangle(cornerRadius: 2)
+                        .fill(CatColor.primary)
+                        .frame(width: 3)
+                    VStack(alignment: .leading) {
+                        Text("回复")
+                            .font(.caption.bold())
+                            .foregroundStyle(CatColor.primary)
+                        Text(reply.content.displayText)
+                            .font(.caption)
+                            .lineLimit(1)
+                    }
+                    Spacer()
+                    Button { replyTo = nil } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 6)
+                .background(CatColor.secondaryBg)
+            }
+
+            VStack(spacing: 0) {
+                CatColor.border
+                    .frame(height: 0.5)
+
+                // Upload progress
+                if isUploading {
+                    HStack(spacing: 6) {
+                        ProgressView()
+                            .scaleEffect(0.8)
+                        Text("正在上传...")
+                            .font(.caption)
+                            .foregroundStyle(CatColor.textSecondary)
+                        Spacer()
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 4)
+                }
+
+                HStack(spacing: 8) {
+                    // Attachment button
+                    Menu {
+                        Button {
+                            showPhotoPicker = true
+                        } label: {
+                            Label("相册", systemImage: "photo.on.rectangle")
+                        }
+                        Button {
+                            showDocumentPicker = true
+                        } label: {
+                            Label("文件", systemImage: "doc")
+                        }
+                    } label: {
+                        Image(systemName: "plus.circle.fill")
+                            .font(.title2)
+                            .foregroundStyle(CatColor.primary)
+                    }
+                    .disabled(isUploading)
+
+                    TextField("输入消息...", text: $inputText, axis: .vertical)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 8)
+                        .lineLimit(1...5)
+                        .background(CatColor.background)
+                        .clipShape(RoundedRectangle(cornerRadius: CatLayout.avatarRadius))
+                        .focused($isComposerFocused)
+                        .onChange(of: inputText) {
+                            ws.sendTyping(topic: topicId)
+                        }
+
+                    Button {
+                        Task { await sendMessage() }
+                    } label: {
+                        Image(systemName: "arrow.up.circle.fill")
+                            .font(.title2)
+                            .foregroundStyle(
+                                inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                                    ? Color.gray.opacity(0.4)
+                                    : CatColor.primary
+                            )
+                    }
+                    .disabled(inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+            }
+            .background(CatColor.cardBg)
         }
     }
 
@@ -366,8 +370,8 @@ struct ChatDetailView: View {
     }
 
     private func loadMessages() async {
-        // Load cached messages first for instant display
-        let cached = MessageStore.shared.loadMessages(for: topicId)
+        // Load cached messages first for instant display (limit to pageSize)
+        let cached = MessageStore.shared.loadMessages(for: topicId, limit: pageSize)
         if !cached.isEmpty {
             messages = mergeMessages(cached, [])
             isLoading = false
@@ -495,6 +499,17 @@ struct ChatDetailView: View {
             withAnimation(.easeOut(duration: 0.22), action)
         } else {
             action()
+        }
+    }
+
+    private func refreshMessageListLayout(_ proxy: ScrollViewProxy, keepBottomVisible: Bool) {
+        messageListRefreshID += 1
+        guard keepBottomVisible else { return }
+
+        Task { @MainActor in
+            await Task.yield()
+            scrollToBottom(proxy, animated: false)
+            scheduleScrollToBottom(proxy)
         }
     }
 

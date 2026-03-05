@@ -32,20 +32,14 @@ class MessageStore {
 
     // MARK: - Read / Write
 
-    func loadMessages(for topic: String) -> [Message] {
+    func loadMessages(for topic: String, limit: Int? = nil) -> [Message] {
         guard let data = defaults.data(forKey: key(for: topic)) else { return [] }
         let decoded = (try? decoder.decode([Message].self, from: data)) ?? []
-        return filterVisible(decoded, for: topic)
-    }
-
-    func storedTopics() -> [String] {
-        defaults.dictionaryRepresentation().keys
-            .filter { $0.hasPrefix("cc_msgs_") && !$0.hasPrefix("cc_msgs_cleared_seq_") }
-            .compactMap { key in
-                let topic = String(key.dropFirst("cc_msgs_".count))
-                return topic.isEmpty ? nil : topic
-            }
-            .sorted()
+        let visible = filterVisible(decoded, for: topic)
+        if let limit = limit {
+            return Array(visible.suffix(limit))
+        }
+        return visible
     }
 
     func saveMessages(_ messages: [Message], for topic: String) {

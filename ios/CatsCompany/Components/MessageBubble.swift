@@ -94,6 +94,7 @@ struct MessageBubble: View {
                     .background(isMe ? CatColor.bubbleSelf : CatColor.bubbleOther)
                     .foregroundStyle(isMe ? CatColor.bubbleSelfText : CatColor.textPrimary)
                     .clipShape(RoundedRectangle(cornerRadius: CatLayout.radius))
+                    .frame(maxWidth: bubbleMaxWidth, alignment: isMe ? .trailing : .leading)
                 if shouldOfferExpandedView {
                     Button {
                         presentExpandedMessage()
@@ -105,7 +106,6 @@ struct MessageBubble: View {
                     .buttonStyle(.plain)
                 }
             }
-            .frame(maxWidth: bubbleMaxWidth, alignment: isMe ? .trailing : .leading)
             .contextMenu {
                 Button { onReply?() } label: {
                     Label("回复", systemImage: "arrowshape.turn.up.left")
@@ -226,7 +226,6 @@ private struct MarkdownMessageText: View {
                 }
             }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     @ViewBuilder
@@ -236,11 +235,9 @@ private struct MarkdownMessageText: View {
             if let markdownContent = attributedString(for: trimmed) {
                 Text(markdownContent)
                     .tint(CatColor.primary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
             } else {
                 Text(trimmed)
                     .font(.body)
-                    .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
     }
