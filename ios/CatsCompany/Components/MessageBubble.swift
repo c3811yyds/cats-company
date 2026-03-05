@@ -60,9 +60,11 @@ struct MessageBubble: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: 8) {
-            if isMe { Spacer(minLength: sideInset) }
-
-            AvatarView(name: senderName, avatarURL: senderAvatarURL, isBot: senderIsBot, size: 32)
+            if !isMe {
+                AvatarView(name: senderName, avatarURL: senderAvatarURL, isBot: senderIsBot, size: 36)
+            } else {
+                Spacer(minLength: sideInset)
+            }
 
             VStack(alignment: isMe ? .trailing : .leading, spacing: 4) {
                 if !isMe {
@@ -122,7 +124,11 @@ struct MessageBubble: View {
                 }
             }
 
-            if !isMe { Spacer(minLength: sideInset) }
+            if isMe {
+                AvatarView(name: senderName, avatarURL: senderAvatarURL, isBot: senderIsBot, size: 36)
+            } else {
+                Spacer(minLength: sideInset)
+            }
         }
         .fullScreenCover(isPresented: $showImagePreview) {
             ImagePreviewView(urlString: previewImageUrl) {
