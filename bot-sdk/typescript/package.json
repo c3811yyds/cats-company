@@ -1,6 +1,6 @@
 {
   "name": "@catscompany/bot-sdk",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Cats Company Bot SDK for TypeScript",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
