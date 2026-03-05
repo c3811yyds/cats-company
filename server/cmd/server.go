@@ -3,11 +3,13 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log"
 	"net"
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -16,6 +18,35 @@ import (
 	"github.com/openchat/openchat/server"
 	"github.com/openchat/openchat/server/db/mysql"
 )
+
+func envString(name string) string {
+	return strings.TrimSpace(os.Getenv(name))
+}
+
+func isProductionEnv() bool {
+	for _, name := range []string{"OC_ENV", "APP_ENV", "GO_ENV", "ENV"} {
+		switch strings.ToLower(envString(name)) {
+		case "prod", "production":
+			return true
+		}
+	}
+	return false
+}
+
+func configureJWTSecret() error {
+	secret := envString("OC_JWT_SECRET")
+	if secret != "" {
+		server.SetJWTSecret(secret)
+		return nil
+	}
+
+	if isProductionEnv() {
+		return fmt.Errorf("OC_JWT_SECRET is required when running in production")
+	}
+
+	log.Printf("OC_JWT_SECRET not set; using an ephemeral in-memory secret (development only)")
+	return nil
+}
 
 func main() {
 	cfgPath := "tinode.conf"
@@ -29,9 +60,8 @@ func main() {
 		cfg = defaultConfig()
 	}
 
-	// JWT secret from env
-	if secret := os.Getenv("OC_JWT_SECRET"); secret != "" {
-		server.SetJWTSecret(secret)
+	if err := configureJWTSecret(); err != nil {
+		log.Fatal(err)
 	}
 
 	// Initialize database
@@ -92,6 +122,7 @@ func main() {
 
 	// Friends (require auth — JWT or API Key for bot access)
 	authWithDB := server.AuthMiddlewareWithDB(db)
+	ownerAuthWithDB := server.OwnerMiddlewareWithDB(db)
 	mux.HandleFunc("/api/friends", authWithDB(friendHandler.HandleGetFriends))
 	mux.HandleFunc("/api/friends/pending", authWithDB(friendHandler.HandleGetPendingRequests))
 	mux.HandleFunc("/api/friends/request", authWithDB(friendHandler.HandleSendRequest))
@@ -131,17 +162,18 @@ func main() {
 	}))
 
 	// Bot management (admin — legacy)
-	mux.HandleFunc("/api/admin/bots", botHandler.HandleListBots)
-	mux.HandleFunc("/api/admin/bots/register", botHandler.HandleRegisterBot)
-	mux.HandleFunc("/api/admin/bots/toggle", botHandler.HandleToggleBot)
-	mux.HandleFunc("/api/admin/bots/rotate-key", botHandler.HandleRotateAPIKey)
-	mux.HandleFunc("/api/admin/bots/stats", botHandler.HandleBotStats)
-	mux.HandleFunc("/api/admin/bots/debug", botHandler.HandleBotDebugLog)
+	mux.HandleFunc("/api/admin/bots", server.AdminMiddleware(botHandler.HandleListBots))
+	mux.HandleFunc("/api/admin/bots/register", server.AdminMiddleware(botHandler.HandleRegisterBot))
+	mux.HandleFunc("/api/admin/bots/toggle", server.AdminMiddleware(botHandler.HandleToggleBot))
+	mux.HandleFunc("/api/admin/bots/rotate-key", server.AdminMiddleware(botHandler.HandleRotateAPIKey))
+	mux.HandleFunc("/api/admin/bots/stats", server.AdminMiddleware(botHandler.HandleBotStats))
+	mux.HandleFunc("/api/admin/bots/debug", server.AdminMiddleware(botHandler.HandleBotDebugLog))
 
 	// Bot management (user-facing — owner creates/manages their bots)
-	mux.HandleFunc("/api/bots", authWithDB(botHandler.HandleBotsRouter))
-	mux.HandleFunc("/api/bots/deploy", authWithDB(botHandler.HandleDeployBot))
-	mux.HandleFunc("/api/bots/visibility", authWithDB(botHandler.HandleSetBotVisibility))
+	mux.HandleFunc("/api/bots", ownerAuthWithDB(botHandler.HandleBotsRouter))
+	mux.HandleFunc("/api/bots/deploy", ownerAuthWithDB(botHandler.HandleDeployBot))
+	mux.HandleFunc("/api/bots/visibility", ownerAuthWithDB(botHandler.HandleSetBotVisibility))
+	mux.HandleFunc("/api/bots/avatar", ownerAuthWithDB(botHandler.HandleUpdateBotAvatar))
 
 	// Groups (require auth)
 	groupHandler := server.NewGroupHandler(db, hub)

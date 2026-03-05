@@ -96,3 +96,12 @@ func (a *Adapter) UpdateUser(id int64, displayName, avatarURL string) error {
 	)
 	return err
 }
+
+// UpdateUserAvatar updates only the avatar URL for a user
+func (a *Adapter) UpdateUserAvatar(id int64, avatarURL string) error {
+	_, err := a.db.Exec(
+		`UPDATE users SET avatar_url = ? WHERE id = ?`,
+		avatarURL, id,
+	)
+	return err
+}

@@ -578,3 +578,51 @@ func (h *BotHandler) HandleBotStats(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, map[string]interface{}{"bots": globalBotStats.GetStats()})
 }
+
+// HandleUpdateBotAvatar handles POST /api/bots/avatar
+func (h *BotHandler) HandleUpdateBotAvatar(w http.ResponseWriter, r *http.Request) {
+	if r.Method \!= http.MethodPost {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+		return
+	}
+
+	ownerUID := UIDFromContext(r.Context())
+	if ownerUID == 0 {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+		return
+	}
+
+	uidStr := r.URL.Query().Get("uid")
+	botUID, err := strconv.ParseInt(uidStr, 10, 64)
+	if err \!= nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid uid"})
+		return
+	}
+
+	// Verify ownership
+	actualOwner, err := h.db.GetBotOwner(botUID)
+	if err \!= nil || actualOwner \!= ownerUID {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "not your bot"})
+		return
+	}
+
+	// Parse multipart form
+	if err := r.ParseMultipartForm(10 << 20); err \!= nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid form"})
+		return
+	}
+
+	avatarURL := r.FormValue("avatar_url")
+	if avatarURL == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "avatar_url required"})
+		return
+	}
+
+	// Update avatar
+	if err := h.db.UpdateUserAvatar(botUID, avatarURL); err \!= nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "update failed"})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{"avatar_url": avatarURL})
+}
