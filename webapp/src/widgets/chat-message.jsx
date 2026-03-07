@@ -1,7 +1,10 @@
 import React, { useState } from 'react';
+import { marked } from 'marked';
 import t from '../i18n';
 import Avatar from './avatar';
 import { resolveMediaURL } from '../api';
+
+marked.setOptions({ breaks: true, gfm: true });
 
 export default function ChatMessage({ message, isSelf, isGroup, senderName, senderAvatarUrl, senderIsBot, replyMessage, onReply }) {
   const content = message.content;
@@ -65,8 +68,19 @@ export default function ChatMessage({ message, isSelf, isGroup, senderName, send
 function TextContent({ content, isGroup }) {
   const text = typeof content === 'string' ? content : content?.text || String(content || '');
 
+  // Check if text has markdown syntax
+  const hasMarkdown = /(\*\*|__|`|#{1,6}\s|^\s*[-*+]\s|^\s*\d+\.\s|\[.*\]\(.*\))/m.test(text);
+
+  if (hasMarkdown) {
+    try {
+      const html = marked.parse(text);
+      return <div dangerouslySetInnerHTML={{ __html: html }} className="oc-markdown" />;
+    } catch (e) {
+      console.error('Markdown parse error:', e);
+    }
+  }
+
   if (isGroup) {
-    // Highlight @mentions
     const parts = text.split(/(@usr\d+)/g);
     return (
       <span>
@@ -81,7 +95,7 @@ function TextContent({ content, isGroup }) {
     );
   }
 
-  return <span>{text}</span>;
+  return <span style={{ whiteSpace: 'pre-wrap' }}>{text}</span>;
 }
 
 function RichContent({ content }) {
@@ -122,21 +136,50 @@ function ImageContent({ payload }) {
 }
 
 function FileContent({ payload }) {
+  const [preview, setPreview] = useState(false);
   if (!payload) return null;
   const sizeStr = payload.size ? formatFileSize(payload.size) : '';
+  const url = resolveMediaURL(payload.url);
+  const ext = payload.name?.split('.').pop()?.toLowerCase();
+  const canPreview = ['pdf', 'txt', 'json', 'md', 'csv'].includes(ext);
+
   return (
-    <div className="oc-rich-file">
-      <div className="oc-rich-file-icon">{'\uD83D\uDCC4'}</div>
-      <div className="oc-rich-file-info">
-        <div className="oc-rich-file-name">{payload.name || 'File'}</div>
-        {sizeStr && <div className="oc-rich-file-size">{sizeStr}</div>}
+    <>
+      <div className="oc-rich-file">
+        <div className="oc-rich-file-icon">{'\uD83D\uDCC4'}</div>
+        <div className="oc-rich-file-info">
+          <div className="oc-rich-file-name">{payload.name || 'File'}</div>
+          {sizeStr && <div className="oc-rich-file-size">{sizeStr}</div>}
+        </div>
+        {canPreview && (
+          <button onClick={() => setPreview(true)} className="oc-rich-file-download" style={{ marginRight: 8 }}>
+            预览
+          </button>
+        )}
+        {payload.url && (
+          <a href={url} download className="oc-rich-file-download" target="_blank" rel="noopener noreferrer">
+            下载
+          </a>
+        )}
       </div>
-      {payload.url && (
-        <a href={resolveMediaURL(payload.url)} download className="oc-rich-file-download" target="_blank" rel="noopener noreferrer">
-          下载
-        </a>
+      {preview && (
+        <div className="oc-modal-overlay" onClick={() => setPreview(false)}>
+          <div className="oc-modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '90vw', maxHeight: '90vh', overflow: 'auto' }}>
+            <div className="oc-modal-header">
+              <h3>{payload.name}</h3>
+              <button onClick={() => setPreview(false)}>×</button>
+            </div>
+            <div className="oc-modal-body">
+              {ext === 'pdf' ? (
+                <iframe src={url} style={{ width: '100%', height: '70vh', border: 'none' }} />
+              ) : (
+                <iframe src={url} style={{ width: '100%', height: '70vh', border: 'none' }} />
+              )}
+            </div>
+          </div>
+        </div>
       )}
-    </div>
+    </>
   );
 }
 

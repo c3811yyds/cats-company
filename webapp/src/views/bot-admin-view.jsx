@@ -25,6 +25,8 @@ export default function BotAdminView({ onBack, user }) {
   const [friendSuccess, setFriendSuccess] = useState(false);
   const [copiedField, setCopiedField] = useState('');
   const [managedProgressStep, setManagedProgressStep] = useState(0);
+  const [editingBot, setEditingBot] = useState(null);
+  const [viewingFriends, setViewingFriends] = useState(null);
 
   useEffect(() => {
     loadBots();
@@ -149,6 +151,33 @@ export default function BotAdminView({ onBack, user }) {
         setCreatedBot(null);
         setFriendStatus('');
       }
+    } catch (e) {
+      setError(e.message || t('error_server'));
+    }
+  };
+
+  const handleEdit = (bot) => {
+    setEditingBot({ ...bot, newDisplayName: bot.display_name, newAvatarUrl: bot.avatar_url || '' });
+  };
+
+  const handleSaveEdit = async () => {
+    if (!editingBot) return;
+    try {
+      await api.updateBot(editingBot.id, {
+        display_name: editingBot.newDisplayName,
+        avatar_url: editingBot.newAvatarUrl,
+      });
+      await loadBots({ silent: true });
+      setEditingBot(null);
+    } catch (e) {
+      setError(e.message || t('error_server'));
+    }
+  };
+
+  const handleViewFriends = async (bot) => {
+    try {
+      const res = await api.getBotFriends(bot.id);
+      setViewingFriends({ bot, friends: res.friends || [] });
     } catch (e) {
       setError(e.message || t('error_server'));
     }
@@ -298,6 +327,18 @@ export default function BotAdminView({ onBack, user }) {
                 <div className="oc-bot-actions">
                   <button
                     className="oc-btn oc-btn-default"
+                    onClick={() => handleEdit(bot)}
+                  >
+                    {t('edit') || 'Edit'}
+                  </button>
+                  <button
+                    className="oc-btn oc-btn-default"
+                    onClick={() => handleViewFriends(bot)}
+                  >
+                    {t('bot_friends') || 'Friends'}
+                  </button>
+                  <button
+                    className="oc-btn oc-btn-default"
                     onClick={() => handleToggleVisibility(bot)}
                   >
                     {bot.visibility === 'public' ? t('bot_make_private') : t('bot_make_public')}
@@ -383,6 +424,72 @@ export default function BotAdminView({ onBack, user }) {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {editingBot && (
+        <div className="oc-modal-overlay" onClick={() => setEditingBot(null)}>
+          <div className="oc-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="oc-modal-header">
+              <h3>{t('bot_edit') || 'Edit Bot'}</h3>
+              <button onClick={() => setEditingBot(null)}>×</button>
+            </div>
+            <div className="oc-modal-body">
+              <div className="oc-form-group">
+                <label>{t('bot_display_name')}</label>
+                <input
+                  type="text"
+                  value={editingBot.newDisplayName}
+                  onChange={(e) => setEditingBot({ ...editingBot, newDisplayName: e.target.value })}
+                />
+              </div>
+              <div className="oc-form-group">
+                <label>{t('avatar_url') || 'Avatar URL'}</label>
+                <input
+                  type="text"
+                  value={editingBot.newAvatarUrl}
+                  onChange={(e) => setEditingBot({ ...editingBot, newAvatarUrl: e.target.value })}
+                  placeholder="https://..."
+                />
+              </div>
+              <div className="oc-modal-footer">
+                <button className="oc-btn oc-btn-default" onClick={() => setEditingBot(null)}>
+                  {t('cancel')}
+                </button>
+                <button className="oc-btn oc-btn-primary" onClick={handleSaveEdit}>
+                  {t('save') || 'Save'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {viewingFriends && (
+        <div className="oc-modal-overlay" onClick={() => setViewingFriends(null)}>
+          <div className="oc-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="oc-modal-header">
+              <h3>{t('bot_friends') || 'Bot Friends'} - {viewingFriends.bot.display_name}</h3>
+              <button onClick={() => setViewingFriends(null)}>×</button>
+            </div>
+            <div className="oc-modal-body">
+              {viewingFriends.friends.length === 0 ? (
+                <div className="oc-empty-state">{t('no_friends') || 'No friends yet'}</div>
+              ) : (
+                <div className="oc-friends-list">
+                  {viewingFriends.friends.map((friend) => (
+                    <div key={friend.id} className="oc-friend-item">
+                      <div className="oc-friend-avatar">{(friend.display_name || friend.username)[0]}</div>
+                      <div className="oc-friend-info">
+                        <div>{friend.display_name || friend.username}</div>
+                        <div style={{ fontSize: 12, color: '#888' }}>@{friend.username}</div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
         </div>
       )}

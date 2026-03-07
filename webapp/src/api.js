@@ -1,5 +1,6 @@
 const API_BASE = process.env.REACT_APP_API_BASE || '';
-const WS_URL = process.env.REACT_APP_WS_URL || `ws://${window.location.host}/v0/channels`;
+const DEFAULT_WS_SCHEME = window.location.protocol === 'https:' ? 'wss' : 'ws';
+const WS_URL = process.env.REACT_APP_WS_URL || `${DEFAULT_WS_SCHEME}://${window.location.host}/v0/channels`;
 
 let token = localStorage.getItem('oc_token');
 let wsConn = null;
@@ -109,8 +110,11 @@ export const api = {
   getMyBots: () => request('GET', '/api/bots'),
   createBot: ({ username, display_name }, deployToCloud = false) =>
     request('POST', deployToCloud ? '/api/bots/deploy' : '/api/bots', { username, display_name }),
+  updateBot: (uid, { display_name, avatar_url }) =>
+    request('PATCH', `/api/bots?uid=${uid}`, { display_name, avatar_url }),
   deleteBot: (uid) => request('DELETE', `/api/bots?uid=${uid}`),
   setBotVisibility: (uid, visibility) => request('PATCH', `/api/bots/visibility?uid=${uid}&v=${visibility}`),
+  getBotFriends: (uid) => request('GET', `/api/bots/friends?uid=${uid}`),
   acceptFriendAsBot: async (apiKey, userId) => {
     const res = await fetch(`${API_BASE}/api/friends/accept`, {
       method: 'POST',

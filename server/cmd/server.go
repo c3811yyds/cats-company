@@ -174,6 +174,7 @@ func main() {
 	mux.HandleFunc("/api/bots/deploy", ownerAuthWithDB(botHandler.HandleDeployBot))
 	mux.HandleFunc("/api/bots/visibility", ownerAuthWithDB(botHandler.HandleSetBotVisibility))
 	mux.HandleFunc("/api/bots/avatar", ownerAuthWithDB(botHandler.HandleUpdateBotAvatar))
+	mux.HandleFunc("/api/bots/friends", ownerAuthWithDB(botHandler.HandleGetBotFriends))
 
 	// Groups (require auth)
 	groupHandler := server.NewGroupHandler(db, hub)

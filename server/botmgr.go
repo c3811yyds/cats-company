@@ -33,6 +33,8 @@ func (h *BotHandler) HandleBotsRouter(w http.ResponseWriter, r *http.Request) {
 		h.HandleListMyBots(w, r)
 	case http.MethodPost:
 		h.HandleCreateBot(w, r)
+	case http.MethodPatch:
+		h.HandleUpdateBot(w, r)
 	case http.MethodDelete:
 		h.HandleDeleteBot(w, r)
 	default:
@@ -625,4 +627,80 @@ func (h *BotHandler) HandleUpdateBotAvatar(w http.ResponseWriter, r *http.Reques
 	}
 
 	writeJSON(w, http.StatusOK, map[string]string{"avatar_url": avatarURL})
+}
+
+// HandleUpdateBot handles PATCH /api/bots?uid=xxx — update bot profile
+func (h *BotHandler) HandleUpdateBot(w http.ResponseWriter, r *http.Request) {
+	ownerUID := UIDFromContext(r.Context())
+	if ownerUID == 0 {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+		return
+	}
+
+	uidStr := r.URL.Query().Get("uid")
+	botUID, err := strconv.ParseInt(uidStr, 10, 64)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid uid"})
+		return
+	}
+
+	actualOwner, err := h.db.GetBotOwner(botUID)
+	if err != nil || actualOwner != ownerUID {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "not your bot"})
+		return
+	}
+
+	var req struct {
+		DisplayName string `json:"display_name"`
+		AvatarURL   string `json:"avatar_url"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request"})
+		return
+	}
+
+	if req.DisplayName != "" {
+		if err := h.db.UpdateUserDisplayName(botUID, req.DisplayName); err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "update failed"})
+			return
+		}
+	}
+	if req.AvatarURL != "" {
+		if err := h.db.UpdateUserAvatar(botUID, req.AvatarURL); err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "update failed"})
+			return
+		}
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{"status": "updated"})
+}
+
+// HandleGetBotFriends handles GET /api/bots/friends?uid=xxx — get bot's friends list
+func (h *BotHandler) HandleGetBotFriends(w http.ResponseWriter, r *http.Request) {
+	ownerUID := UIDFromContext(r.Context())
+	if ownerUID == 0 {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+		return
+	}
+
+	uidStr := r.URL.Query().Get("uid")
+	botUID, err := strconv.ParseInt(uidStr, 10, 64)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid uid"})
+		return
+	}
+
+	actualOwner, err := h.db.GetBotOwner(botUID)
+	if err != nil || actualOwner != ownerUID {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "not your bot"})
+		return
+	}
+
+	friends, err := h.db.GetFriends(botUID)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to get friends"})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{"friends": friends})
 }
