@@ -95,6 +95,7 @@ func main() {
 	botHandler := server.NewBotHandler(db, deployer)
 	msgHandler := server.NewMessageHandler(db)
 	uploadHandler := server.NewUploadHandler("./uploads", "/uploads")
+	usageHandler := server.NewUsageHandler(db)
 
 	// HTTP routes
 	mux := http.NewServeMux()
@@ -195,6 +196,10 @@ func main() {
 	mux.HandleFunc("/api/upload", authWithDB(uploadHandler.HandleUpload))
 	mux.HandleFunc("/uploads/", uploadHandler.HandleServeFile)
 
+	// Token usage tracking (API Key auth for bots)
+	mux.HandleFunc("/api/v1/usage/report", authWithDB(usageHandler.HandleReportUsage))
+	mux.HandleFunc("/api/v1/usage", authWithDB(usageHandler.HandleGetUsage))
+
 	// WebSocket
 	mux.HandleFunc(cfg.WebSocket.Path, func(w http.ResponseWriter, r *http.Request) {
 		server.ServeWS(hub, w, r)
@@ -211,7 +216,7 @@ func main() {
 	// The WS pump handles its own deadlines (writeWait, pongWait).
 	httpServer := &http.Server{
 		Addr:    cfg.Listen,
-		Handler: mux,
+		Handler: server.CORSMiddleware(mux),
 	}
 
 	// Start gRPC server
@@ -239,12 +244,23 @@ func main() {
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
-	log.Println("shutting down...")
+	log.Println("shutting down gracefully...")
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
+	// Stop accepting new connections
+	log.Println("stopping gRPC server...")
 	grpcServer.GracefulStop()
-	httpServer.Shutdown(ctx)
+
+	log.Println("stopping HTTP server...")
+	if err := httpServer.Shutdown(ctx); err != nil {
+		log.Printf("HTTP shutdown error: %v", err)
+	}
+
+	// Close WebSocket connections gracefully
+	log.Println("closing WebSocket connections...")
+	hub.Shutdown()
+
 	log.Println("server stopped")
 }
