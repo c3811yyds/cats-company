@@ -39,3 +39,17 @@ mysql_data/
 .claude/
 CLAUDE.md
 packages/skills/scripts/__pycache__/
+
+# 部署脚本（包含敏感信息）
+deploy/*.sh
+deploy/.env*
+
+# 包含服务器信息的文档
+ROADMAP_COMPLETION.md
+COMPLETE_SUMMARY.md
+DEPLOYMENT_REPORT.md
+SECURITY_CLEANUP.md
+
+# 临时文件
+*.log
+server.log
