@@ -121,6 +121,26 @@ export default function MessagesView({ topic, topicName, user, isGroup, groupId,
         }
       }
 
+      // Handle ctrl message (server confirmation with seq)
+      if (msg.ctrl && msg.ctrl.params && msg.ctrl.params.seq) {
+        setMessages((prev) => {
+          // Find the first pending message (should be the one we just sent)
+          const pendingIdx = prev.findIndex((m) => m._pending);
+          if (pendingIdx !== -1) {
+            const next = [...prev];
+            // Replace temporary ID with server seq, remove _pending flag
+            next[pendingIdx] = {
+              ...next[pendingIdx],
+              id: msg.ctrl.params.seq,
+              _pending: false
+            };
+            return next;
+          }
+          return prev;
+        });
+        updateTopicSeq(topic, msg.ctrl.params.seq);
+      }
+
       // Typing indicator from peer
       if (msg.info && msg.info.topic === topic && msg.info.what === 'kp') {
         const fromUid = parseUid(msg.info.from);
