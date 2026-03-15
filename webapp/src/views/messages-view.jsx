@@ -96,12 +96,20 @@ export default function MessagesView({ topic, topicName, user, isGroup, groupId,
           };
           // If this is our own message echoed back, replace the optimistic entry
           if (fromUid === user.uid) {
-            // Find the most recent pending message (should be the one we just sent)
-            const pendingIdx = prev.findIndex((m) => m._pending);
+            // Find pending message with matching content
+            const pendingIdx = prev.findIndex((m) => {
+              if (!m._pending) return false;
+              const match = m.content.trim() === serverMsg.content.trim();
+              console.log('[DEBUG] Matching pending:', { pending: m.content, server: serverMsg.content, match });
+              return match;
+            });
             if (pendingIdx !== -1) {
+              console.log('[DEBUG] Replacing pending message at index', pendingIdx);
               const next = [...prev];
               next[pendingIdx] = serverMsg;
               return next;
+            } else {
+              console.log('[DEBUG] No matching pending message found');
             }
           }
           return mergeMessages(prev, [serverMsg]);
