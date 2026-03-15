@@ -96,7 +96,8 @@ export default function MessagesView({ topic, topicName, user, isGroup, groupId,
           };
           // If this is our own message echoed back, replace the optimistic entry
           if (fromUid === user.uid) {
-            const pendingIdx = prev.findIndex((m) => m._pending && m.content === serverMsg.content);
+            // Find the most recent pending message (should be the one we just sent)
+            const pendingIdx = prev.findIndex((m) => m._pending);
             if (pendingIdx !== -1) {
               const next = [...prev];
               next[pendingIdx] = serverMsg;
