@@ -7,6 +7,7 @@ import (
 	"strconv"
 
 	"github.com/openchat/openchat/server/db/mysql"
+	"github.com/openchat/openchat/server/store/types"
 )
 
 // MessageHandler handles message-related API requests.
@@ -21,9 +22,12 @@ func NewMessageHandler(db *mysql.Adapter) *MessageHandler {
 
 // SendMessageRequest is the JSON body for sending a message.
 type SendMessageRequest struct {
-	TopicID string `json:"topic_id"`
-	Content string `json:"content"`
-	MsgType string `json:"msg_type,omitempty"`
+	TopicID       string                `json:"topic_id"`
+	Content       string                `json:"content,omitempty"`
+	ContentBlocks []types.ContentBlock  `json:"content_blocks,omitempty"`
+	MsgType       string                `json:"msg_type,omitempty"`
+	Mode          string                `json:"mode,omitempty"`
+	Role          string                `json:"role,omitempty"`
 }
 
 // HandleSendMessage handles POST /api/messages/send
@@ -36,8 +40,8 @@ func (h *MessageHandler) HandleSendMessage(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	if req.Content == "" || req.TopicID == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "topic_id and content required"})
+	if (req.Content == "" && len(req.ContentBlocks) == 0) || req.TopicID == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "topic_id and content/content_blocks required"})
 		return
 	}
 
@@ -49,19 +53,40 @@ func (h *MessageHandler) HandleSendMessage(w http.ResponseWriter, r *http.Reques
 	// Ensure topic exists
 	h.db.CreateTopic(req.TopicID, "p2p", uid)
 
-	id, err := h.db.SaveMessage(req.TopicID, uid, req.Content, msgType)
+	var id int64
+	var err error
+
+	// Use new API if content_blocks provided
+	if len(req.ContentBlocks) > 0 {
+		mode := req.Mode
+		if mode == "" {
+			mode = "code"
+		}
+		id, err = h.db.SaveMessageWithBlocks(req.TopicID, uid, req.Content, req.ContentBlocks, mode, req.Role, msgType)
+	} else {
+		id, err = h.db.SaveMessage(req.TopicID, uid, req.Content, msgType)
+	}
+
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to send"})
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]interface{}{
+	resp := map[string]interface{}{
 		"id":       id,
 		"topic_id": req.TopicID,
 		"from_uid": uid,
-		"content":  req.Content,
 		"msg_type": msgType,
-	})
+	}
+	if len(req.ContentBlocks) > 0 {
+		resp["content_blocks"] = req.ContentBlocks
+		resp["mode"] = req.Mode
+		resp["role"] = req.Role
+	} else {
+		resp["content"] = req.Content
+	}
+
+	writeJSON(w, http.StatusOK, resp)
 }
 
 // HandleGetMessages handles GET /api/messages?topic_id=xxx&limit=50&offset=0

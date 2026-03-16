@@ -63,12 +63,27 @@ type Topic struct {
 
 // Message represents a chat message.
 type Message struct {
-	ID        int64     `json:"id"`
-	TopicID   string    `json:"topic_id"`
-	FromUID   int64     `json:"from_uid"`
-	Content   string    `json:"content"`
-	MsgType   string    `json:"msg_type"` // "text", "image", "voice", "file"
-	CreatedAt time.Time `json:"created_at"`
+	ID            int64          `json:"id"`
+	TopicID       string         `json:"topic_id"`
+	FromUID       int64          `json:"from_uid"`
+	Content       string         `json:"content,omitempty"`
+	ContentBlocks []ContentBlock `json:"content_blocks,omitempty"`
+	MsgType       string         `json:"msg_type"` // "text", "image", "voice", "file"
+	Mode          string         `json:"mode,omitempty"`
+	Role          string         `json:"role,omitempty"`
+	CreatedAt     time.Time      `json:"created_at"`
+}
+
+// ContentBlock represents a block of content in code mode.
+type ContentBlock struct {
+	Type      string                 `json:"type"`
+	Text      string                 `json:"text,omitempty"`
+	Thinking  string                 `json:"thinking,omitempty"`
+	ID        string                 `json:"id,omitempty"`
+	Name      string                 `json:"name,omitempty"`
+	Input     map[string]interface{} `json:"input,omitempty"`
+	ToolUseID string                 `json:"tool_use_id,omitempty"`
+	IsError   bool                   `json:"is_error,omitempty"`
 }
 
 // ConversationSummary is the lightweight chat-list payload for a topic.

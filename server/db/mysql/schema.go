@@ -29,6 +29,7 @@ func (a *Adapter) CreateSchema() error {
 		migrateBotConfigAddOwnerID,
 		migrateBotConfigAddVisibility,
 		migrateBotConfigAddTenantName,
+		migrateMessagesAddCodeMode,
 	}
 	for _, m := range migrations {
 		if _, err := a.db.Exec(m); err != nil {
@@ -201,4 +202,12 @@ ALTER TABLE bot_config ADD COLUMN visibility ENUM('public','private') NOT NULL D
 // NULL = self-hosted (third-party), non-NULL = platform-managed deployment.
 const migrateBotConfigAddTenantName = `
 ALTER TABLE bot_config ADD COLUMN tenant_name VARCHAR(128) DEFAULT NULL;
+`
+
+// Migration: add code mode support to messages table.
+const migrateMessagesAddCodeMode = `
+ALTER TABLE messages
+  ADD COLUMN content_blocks JSON DEFAULT NULL,
+  ADD COLUMN mode VARCHAR(20) DEFAULT 'normal',
+  ADD COLUMN role VARCHAR(20) DEFAULT NULL;
 `
