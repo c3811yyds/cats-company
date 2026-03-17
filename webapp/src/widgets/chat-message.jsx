@@ -12,27 +12,7 @@ export default function ChatMessage({ message, isSelf, isGroup, senderName, send
 
   // Check if this is a code mode message
   if (message.content_blocks && message.content_blocks.length > 0) {
-    return (
-      <div className={`oc-msg ${isSelf ? 'self' : ''}`}>
-        {!isSelf && (
-          <Avatar
-            name={senderName || message.from_name || message.from_uid}
-            src={senderAvatarUrl}
-            size={40}
-            isBot={senderIsBot}
-            className="oc-msg-avatar"
-          />
-        )}
-        <div className="oc-msg-body">
-          {isGroup && !isSelf && senderName && (
-            <div className="oc-msg-sender">{senderName}</div>
-          )}
-          <div className="oc-msg-bubble">
-            <CodeModeMessage message={message} />
-          </div>
-        </div>
-      </div>
-    );
+    return <CodeModeMessage message={message} isSelf={isSelf} isGroup={isGroup} senderName={senderName} senderAvatarUrl={senderAvatarUrl} senderIsBot={senderIsBot} />;
   }
 
   // Parse rich content

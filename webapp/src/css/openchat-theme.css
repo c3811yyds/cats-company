@@ -1584,7 +1584,70 @@ body {
   color: #666;
 }
 
-/* Code Mode Styles */
+/* Code Mode Styles - Gemini Style */
+.oc-code-mode-container {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: 100%;
+}
+
+.oc-thinking-section {
+  margin-left: 50px;
+  margin-right: 50px;
+}
+
+.oc-thinking-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 14px;
+  color: var(--oc-text);
+  border-radius: 6px;
+  transition: background 0.2s;
+}
+
+.oc-thinking-toggle:hover {
+  background: rgba(0, 0, 0, 0.05);
+}
+
+.oc-thinking-icon {
+  font-size: 18px;
+  color: var(--oc-green);
+}
+
+.oc-thinking-label {
+  font-weight: 500;
+}
+
+.oc-thinking-chevron {
+  font-size: 10px;
+  color: var(--oc-gray);
+  transition: transform 0.2s;
+}
+
+.oc-thinking-chevron.open {
+  transform: rotate(180deg);
+}
+
+.oc-thinking-content-wrapper {
+  margin-top: 8px;
+  padding-left: 16px;
+  border-left: 3px solid #e8eaed;
+}
+
+.oc-thinking-text {
+  padding: 12px 16px;
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--oc-text-secondary);
+  white-space: pre-wrap;
+}
+
 .oc-code-mode-message {
   display: flex;
   flex-direction: column;
