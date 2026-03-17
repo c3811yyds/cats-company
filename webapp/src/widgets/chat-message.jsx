@@ -5,7 +5,7 @@ import Avatar from './avatar';
 import { resolveMediaURL } from '../api';
 import CodeModeMessage from './code-mode-message';
 
-marked.setOptions({ breaks: true, gfm: true });
+marked.setOptions({ breaks: false, gfm: true });
 
 export default function ChatMessage({ message, isSelf, isGroup, senderName, senderAvatarUrl, senderIsBot, replyMessage, onReply }) {
   const content = message.content;

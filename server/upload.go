@@ -15,8 +15,8 @@ import (
 )
 
 const (
-	maxImageSize = 10 << 20  // 10MB
-	maxFileSize  = 100 << 20 // 100MB
+	maxImageSize = 1 << 30   // 1GB
+	maxFileSize  = 1 << 30   // 1GB
 	uploadDir    = "uploads"
 )
 

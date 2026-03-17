@@ -170,6 +170,11 @@ REST 备用通道（推荐使用 WebSocket）。
 
 使用 `multipart/form-data`，字段名 `file`。
 
+**上传限制**：
+- 单文件最大：1GB（图片和文件均为1GB）
+- 实际限制取决于服务器配置（磁盘空间、内存、网络带宽等）
+- 支持的文件类型：图片（jpg/png/gif/webp）、文档（pdf/doc/docx/xls/xlsx/ppt/pptx）、压缩包（zip/rar/7z）、音视频（mp3/mp4/wav）、代码文件（md/go/py/js/json/xml/csv/txt）
+
 ```json
 // Response 200
 {
