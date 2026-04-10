@@ -1,0 +1,103 @@
+name: Deploy Docker Test
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: cats-company-deploy-test
+  cancel-in-progress: true
+
+jobs:
+  deploy-test:
+    runs-on: ubuntu-latest
+    environment: test
+    env:
+      TEST_STACK_ROOT: /srv/catscompany-test
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      - name: Build and push server image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/Dockerfile.server
+          push: true
+          tags: ghcr.io/${{ github.repository_owner }}/cats-company-server:${{ github.sha }}
+
+      - name: Build and push web image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/Dockerfile.nginx
+          push: true
+          build-args: |
+            REACT_APP_API_BASE=
+          tags: ghcr.io/${{ github.repository_owner }}/cats-company-web:${{ github.sha }}
+
+      - name: Prepare SSH key
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+        run: |
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -H "${{ secrets.SSH_HOST }}" >> ~/.ssh/known_hosts
+
+      - name: Upload test stack files
+        run: |
+          ssh "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" "mkdir -p ${TEST_STACK_ROOT}/compose ${TEST_STACK_ROOT}/env ${TEST_STACK_ROOT}/data/mysql ${TEST_STACK_ROOT}/data/uploads ${TEST_STACK_ROOT}/logs /usr/local/bin"
+          scp deploy/test/bootstrap-server.sh "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}:${TEST_STACK_ROOT}/compose/"
+          scp deploy/test/remote-deploy.sh "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}:${TEST_STACK_ROOT}/compose/"
+          scp deploy/test/remote-status.sh "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}:${TEST_STACK_ROOT}/compose/"
+          scp deploy/test/docker-compose.yml "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}:${TEST_STACK_ROOT}/compose/"
+          scp deploy/test/tinode.test.conf "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}:${TEST_STACK_ROOT}/compose/"
+          scp deploy/init-db.sh "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}:${TEST_STACK_ROOT}/compose/"
+          scp deploy/test/env.test.example "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}:${TEST_STACK_ROOT}/env/"
+
+      - name: Deploy isolated test stack
+        env:
+          GHCR_USERNAME: ${{ secrets.GHCR_USERNAME }}
+          GHCR_TOKEN: ${{ secrets.GHCR_TOKEN }}
+        run: |
+          ssh "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" "GITHUB_SHA=${GITHUB_SHA} TEST_STACK_ROOT=${TEST_STACK_ROOT} GHCR_OWNER=${{ github.repository_owner }} GHCR_USERNAME=${GHCR_USERNAME} GHCR_TOKEN=${GHCR_TOKEN} bash -s" <<'EOF'
+          set -euo pipefail
+
+          root="${TEST_STACK_ROOT}"
+          revision="${GITHUB_SHA}"
+          chmod +x "$root/compose/bootstrap-server.sh" "$root/compose/remote-deploy.sh" "$root/compose/remote-status.sh"
+          "$root/compose/bootstrap-server.sh" "$root"
+          "$root/compose/remote-deploy.sh" "$root" "$revision"
+          "$root/compose/remote-status.sh" "$root"
+          EOF
+
+      - name: Dump remote status on failure
+        if: failure()
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+        run: |
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -H "${{ secrets.SSH_HOST }}" >> ~/.ssh/known_hosts
+          ssh "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" "bash ${TEST_STACK_ROOT}/compose/remote-status.sh ${TEST_STACK_ROOT} || true"

@@ -1,0 +1,44 @@
+services:
+  server:
+    image: "${GHCR_REGISTRY:-ghcr.io}/${GHCR_OWNER}/cats-company-server:${IMAGE_TAG}"
+    restart: unless-stopped
+    environment:
+      OC_DB_DSN: "${OC_DB_DSN}"
+      OC_JWT_SECRET: "${OC_JWT_SECRET}"
+      APP_ENV: production
+      TZ: Asia/Shanghai
+    ports:
+      - "${PROD_API_HOST_PORT:-26061}:6061"
+      - "${PROD_GRPC_HOST_PORT:-26062}:6062"
+    volumes:
+      - "${PROD_STACK_ROOT}/data/uploads:/app/uploads"
+      - "${PROD_STACK_ROOT}/compose/tinode.prod.conf:/app/tinode.conf:ro"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:6061/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+    networks:
+      - prodnet
+
+  web:
+    image: "${GHCR_REGISTRY:-ghcr.io}/${GHCR_OWNER}/cats-company-web:${IMAGE_TAG}"
+    restart: unless-stopped
+    depends_on:
+      server:
+        condition: service_healthy
+    ports:
+      - "${PROD_WEB_HOST_PORT:-28080}:80"
+    healthcheck:
+      test: ["CMD-SHELL", "nginx -t && test -s /usr/share/nginx/html/index.html"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+    networks:
+      - prodnet
+
+networks:
+  prodnet:
+    name: catscompany_prod_net
