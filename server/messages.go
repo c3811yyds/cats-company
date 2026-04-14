@@ -12,22 +12,25 @@ import (
 
 // MessageHandler handles message-related API requests.
 type MessageHandler struct {
-	db *mysql.Adapter
+	db  *mysql.Adapter
+	hub *Hub
 }
 
 // NewMessageHandler creates a new MessageHandler.
-func NewMessageHandler(db *mysql.Adapter) *MessageHandler {
-	return &MessageHandler{db: db}
+func NewMessageHandler(db *mysql.Adapter, hub *Hub) *MessageHandler {
+	return &MessageHandler{db: db, hub: hub}
 }
 
 // SendMessageRequest is the JSON body for sending a message.
 type SendMessageRequest struct {
-	TopicID       string                `json:"topic_id"`
-	Content       string                `json:"content,omitempty"`
-	ContentBlocks []types.ContentBlock  `json:"content_blocks,omitempty"`
-	MsgType       string                `json:"msg_type,omitempty"`
-	Mode          string                `json:"mode,omitempty"`
-	Role          string                `json:"role,omitempty"`
+	TopicID       string               `json:"topic_id"`
+	Content       string               `json:"content,omitempty"`
+	ContentBlocks []types.ContentBlock `json:"content_blocks,omitempty"`
+	MsgType       string               `json:"msg_type,omitempty"`
+	Type          string               `json:"type,omitempty"`
+	Mode          string               `json:"mode,omitempty"`
+	Role          string               `json:"role,omitempty"`
+	ReplyTo       int                  `json:"reply_to,omitempty"`
 }
 
 // HandleSendMessage handles POST /api/messages/send
@@ -47,22 +50,29 @@ func (h *MessageHandler) HandleSendMessage(w http.ResponseWriter, r *http.Reques
 
 	msgType := req.MsgType
 	if msgType == "" {
+		msgType = req.Type
+	}
+	if msgType == "" {
 		msgType = "text"
 	}
 
-	// Ensure topic exists
-	h.db.CreateTopic(req.TopicID, "p2p", uid)
+	if !isGroupTopic(req.TopicID) {
+		// Ensure p2p topic exists before saving.
+		h.db.CreateTopic(req.TopicID, "p2p", uid)
+	}
 
 	var id int64
 	var err error
 
-	// Use new API if content_blocks provided
+	// Use new API if content_blocks provided.
 	if len(req.ContentBlocks) > 0 {
 		mode := req.Mode
 		if mode == "" {
 			mode = "code"
 		}
 		id, err = h.db.SaveMessageWithBlocks(req.TopicID, uid, req.Content, req.ContentBlocks, mode, req.Role, msgType)
+	} else if req.ReplyTo > 0 {
+		id, err = h.db.SaveMessageWithReply(req.TopicID, uid, req.Content, msgType, int64(req.ReplyTo))
 	} else {
 		id, err = h.db.SaveMessage(req.TopicID, uid, req.Content, msgType)
 	}
@@ -74,9 +84,11 @@ func (h *MessageHandler) HandleSendMessage(w http.ResponseWriter, r *http.Reques
 
 	resp := map[string]interface{}{
 		"id":       id,
+		"seq_id":   id,
 		"topic_id": req.TopicID,
 		"from_uid": uid,
 		"msg_type": msgType,
+		"reply_to": req.ReplyTo,
 	}
 	if len(req.ContentBlocks) > 0 {
 		resp["content_blocks"] = req.ContentBlocks
@@ -86,7 +98,51 @@ func (h *MessageHandler) HandleSendMessage(w http.ResponseWriter, r *http.Reques
 		resp["content"] = req.Content
 	}
 
+	h.fanoutMessage(uid, &req, id)
 	writeJSON(w, http.StatusOK, resp)
+}
+
+func (h *MessageHandler) fanoutMessage(uid int64, req *SendMessageRequest, msgID int64) {
+	if h == nil || h.hub == nil || req == nil {
+		return
+	}
+
+	dataMsg := &ServerMessage{
+		Data: &MsgServerData{
+			Topic:   req.TopicID,
+			From:    formatUID(uid),
+			SeqID:   int(msgID),
+			Content: req.Content,
+			ReplyTo: req.ReplyTo,
+		},
+	}
+
+	if isGroupTopic(req.TopicID) {
+		groupID := extractGroupID(req.TopicID)
+		if groupID == 0 {
+			return
+		}
+		mentions := parseMentions(req.Content)
+		dataMsg.Data.Mentions = mentions
+		h.hub.SendToUserExcept(uid, dataMsg, nil)
+		h.hub.broadcastToGroupWithMentions(groupID, dataMsg, uid, mentions, uid)
+		return
+	}
+
+	peerUID := extractPeerUID(req.TopicID, uid)
+	if peerUID == 0 {
+		return
+	}
+
+	h.hub.SendToUserExcept(uid, dataMsg, nil)
+	h.hub.SendToUser(peerUID, dataMsg)
+
+	if senderClient := h.hub.getClient(uid); senderClient != nil && senderClient.accountType == types.AccountBot {
+		h.hub.botStats.RecordSent(uid, req.TopicID)
+	}
+	if peerClient := h.hub.getClient(peerUID); peerClient != nil && peerClient.accountType == types.AccountBot {
+		h.hub.botStats.RecordRecv(peerUID)
+	}
 }
 
 // HandleGetMessages handles GET /api/messages?topic_id=xxx&limit=50&offset=0
