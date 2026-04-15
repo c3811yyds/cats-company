@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
+import React, { memo, useMemo, useState } from 'react';
 import { marked } from 'marked';
-import { ChevronDown, ChevronRight, Terminal, Brain, FileText, Download } from 'lucide-react';
+import { ChevronDown, ChevronRight, Terminal, Brain, FileText, Download, CornerUpLeft, MoreHorizontal, SmilePlus, X } from 'lucide-react';
 import t from '../i18n';
 import Avatar from './avatar';
 import { resolveMediaURL } from '../api';
@@ -14,10 +14,10 @@ function toolInputSummary(name, input) {
   if (input.command) return input.command;
   if (input.file_path) return input.file_path;
   if (input.pattern) return input.pattern;
-  if (input.content && typeof input.content === 'string') return input.content.slice(0, 120) + (input.content.length > 120 ? '…' : '');
+  if (input.content && typeof input.content === 'string') return input.content.slice(0, 120) + (input.content.length > 120 ? '...' : '');
   const vals = Object.values(input);
   const first = vals.find(v => typeof v === 'string');
-  if (first) return first.slice(0, 120) + (first.length > 120 ? '…' : '');
+  if (first) return first.slice(0, 120) + (first.length > 120 ? '...' : '');
   return JSON.stringify(input).slice(0, 120);
 }
 
@@ -25,7 +25,7 @@ function truncateResult(text, max = 300) {
   if (!text) return '';
   if (typeof text !== 'string') text = JSON.stringify(text);
   if (text.length <= max) return text;
-  return text.slice(0, max) + '…';
+  return text.slice(0, max) + '...';
 }
 
 function groupBlocks(messages) {
@@ -191,45 +191,69 @@ function WorkingProcess({ blocks }) {
   );
 }
 
-export default function ChatMessage({ message, isSelf, isGroup, senderName, senderAvatarUrl, senderIsBot, replyMessage, onReply, showThinking = true, isConsecutive }) {
+function ChatMessageComponent({ message, workingMessages = null, isSelf, isGroup, senderName, senderAvatarUrl, senderIsBot, replyMessage, onReply, showThinking = true, isConsecutive }) {
   const content = message.content;
-  const workingMessages = message._working || [];
-  const storedBlocks = Array.isArray(message.content_blocks) ? message.content_blocks : [];
-  const workingBlocks = workingMessages.length > 0
-    ? groupBlocks(workingMessages)
-    : storedBlocks.length > 0
-      ? groupContentBlocks(storedBlocks)
-      : [];
-  const blockText = storedBlocks
-    .filter((block) => block.type === 'text' && block.text)
-    .map((block) => block.text)
-    .join('\n\n');
-  const renderedTextContent = storedBlocks.length > 0 ? blockText : content;
-  const hasText = typeof renderedTextContent === 'string' ? renderedTextContent.trim().length > 0 : (renderedTextContent != null);
+  const effectiveWorkingMessages = workingMessages || message._working || [];
+  const storedBlocks = useMemo(() => Array.isArray(message.content_blocks) ? message.content_blocks : [], [message.content_blocks]);
+  const workingBlocks = useMemo(() => {
+    if (effectiveWorkingMessages.length > 0) {
+      return groupBlocks(effectiveWorkingMessages);
+    }
+    if (storedBlocks.length > 0) {
+      return groupContentBlocks(storedBlocks);
+    }
+    return [];
+  }, [effectiveWorkingMessages, storedBlocks]);
+  const renderedTextContent = useMemo(() => {
+    if (storedBlocks.length === 0) return content;
+    return storedBlocks
+      .filter((block) => block.type === 'text' && block.text)
+      .map((block) => block.text)
+      .join('\n\n');
+  }, [storedBlocks, content]);
+  const hasText = useMemo(() => (
+    typeof renderedTextContent === 'string'
+      ? renderedTextContent.trim().length > 0
+      : renderedTextContent != null
+  ), [renderedTextContent]);
+
+  const parsed = useMemo(() => {
+    if (storedBlocks.length > 0) return null;
+    if (typeof content === 'object' && content !== null && content.type) {
+      return content;
+    }
+    if (typeof content === 'string') {
+      try {
+        const obj = JSON.parse(content);
+        if (obj && obj.type) return obj;
+      } catch (e) {
+        // plain text
+      }
+    }
+    return null;
+  }, [storedBlocks, content]);
+
+  const timeString = useMemo(() => (
+    new Date(message.created_at || Date.now()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+  ), [message.created_at]);
+  const displayName = senderName || message.from_name || `User ${message.from_uid || ''}`;
 
   if (!hasText && workingBlocks.length === 0) return null;
-
-  let parsed = null;
-  if (storedBlocks.length === 0 && typeof content === 'object' && content !== null && content.type) {
-    parsed = content;
-  } else if (storedBlocks.length === 0 && typeof content === 'string') {
-    try {
-      const obj = JSON.parse(content);
-      if (obj && obj.type) parsed = obj;
-    } catch (e) {
-      // plain text
-    }
-  }
-
-  const timeString = new Date(message.created_at || Date.now()).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
-  const displayName = senderName || message.from_name || `User ${message.from_uid || ''}`;
 
   return (
     <div className={`v3-message ${isConsecutive ? 'grouped' : ''}`}>
       <div className="v3-message-actions">
-        <button className="v3-action-btn" aria-label="Add Reaction">😀</button>
-        {onReply && <button className="v3-action-btn" onClick={onReply} aria-label="Reply">↲</button>}
-        <button className="v3-action-btn" aria-label="More Options">⋯</button>
+        <button className="v3-action-btn" aria-label="Add Reaction" type="button">
+          <SmilePlus size={14} />
+        </button>
+        {onReply && (
+          <button className="v3-action-btn" onClick={onReply} aria-label="Reply" type="button">
+            <CornerUpLeft size={14} />
+          </button>
+        )}
+        <button className="v3-action-btn" aria-label="More Options" type="button">
+          <MoreHorizontal size={14} />
+        </button>
       </div>
 
       <div className="v3-avatar-col">
@@ -275,19 +299,39 @@ export default function ChatMessage({ message, isSelf, isGroup, senderName, send
   );
 }
 
+const ChatMessage = memo(ChatMessageComponent, (prevProps, nextProps) => {
+  return prevProps.message === nextProps.message &&
+    prevProps.workingMessages === nextProps.workingMessages &&
+    prevProps.isSelf === nextProps.isSelf &&
+    prevProps.isGroup === nextProps.isGroup &&
+    prevProps.senderName === nextProps.senderName &&
+    prevProps.senderAvatarUrl === nextProps.senderAvatarUrl &&
+    prevProps.senderIsBot === nextProps.senderIsBot &&
+    prevProps.replyMessage === nextProps.replyMessage &&
+    prevProps.showThinking === nextProps.showThinking &&
+    prevProps.isConsecutive === nextProps.isConsecutive;
+});
+
+export default ChatMessage;
+
 function TextContent({ content, isGroup }) {
-  const text = typeof content === 'string' ? content : content?.text || String(content || '');
+  const text = useMemo(() => (
+    typeof content === 'string' ? content : content?.text || String(content || '')
+  ), [content]);
 
-  // Check if text has markdown syntax
-  const hasMarkdown = /(\*\*|__|`|#{1,6}\s|^\s*[-*+]\s|^\s*\d+\.\s|\[.*\]\(.*\))/m.test(text);
-
-  if (hasMarkdown) {
+  const markdownHtml = useMemo(() => {
+    const hasMarkdown = /(\*\*|__|`|#{1,6}\s|^\s*[-*+]\s|^\s*\d+\.\s|\[.*\]\(.*\))/m.test(text);
+    if (!hasMarkdown) return null;
     try {
-      const html = marked.parse(escapeHtml(text));
-      return <div dangerouslySetInnerHTML={{ __html: html }} className="oc-markdown" />;
+      return marked.parse(escapeHtml(text));
     } catch (e) {
       console.error('Markdown parse error:', e);
+      return null;
     }
+  }, [text]);
+
+  if (markdownHtml) {
+    return <div dangerouslySetInnerHTML={{ __html: markdownHtml }} className="oc-markdown" />;
   }
 
   if (isGroup) {
@@ -356,7 +400,7 @@ function FileContent({ payload }) {
   const ext = payload.name?.split('.').pop()?.toUpperCase() || 'FILE';
   const canPreview = ['PDF', 'TXT', 'JSON', 'MD', 'CSV', 'JS', 'PY', 'GO', 'HTML', 'CSS'].includes(ext);
   
-  const subtitle = `${sizeStr} ${sizeStr ? '• ' : ''}${ext} Document`;
+  const subtitle = `${sizeStr}${sizeStr ? ' \u2022 ' : ''}${ext} Document`;
 
   const handleOpenPreview = async () => {
     setPreview(true);
@@ -419,7 +463,14 @@ function FileContent({ payload }) {
                 <a href={url} download title="Download Original" style={{ color: 'var(--v3-text-muted)', cursor: 'pointer', display: 'flex', alignItems: 'center' }} target="_blank" rel="noopener noreferrer">
                   <Download size={18} />
                 </a>
-                <button onClick={() => setPreview(false)} style={{ background: 'transparent', border: 'none', color: 'var(--v3-text-muted)', fontSize: 26, cursor: 'pointer', display: 'flex', alignItems: 'center', margin: '-4px 0 -4px 8px' }}>×</button>
+                <button
+                  aria-label="Close preview"
+                  onClick={() => setPreview(false)}
+                  style={{ background: 'transparent', border: 'none', color: 'var(--v3-text-muted)', fontSize: 26, cursor: 'pointer', display: 'flex', alignItems: 'center', margin: '-4px 0 -4px 8px' }}
+                  type="button"
+                >
+                  <X size={18} />
+                </button>
               </div>
             </div>
             <div className="oc-modal-body" style={{ flex: 1, padding: 0, overflow: 'hidden' }}>

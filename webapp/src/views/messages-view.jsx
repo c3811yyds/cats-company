@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
+import { MoreHorizontal } from 'lucide-react';
 import { api, wsSendMessage, wsSendTyping, wsSendRead, onWSMessage, updateTopicSeq } from '../api';
 import t from '../i18n';
 import ChatMessage from '../widgets/chat-message';
@@ -64,7 +65,6 @@ export default function MessagesView({ topic, topicName, user, isGroup, groupId,
         setGroupInfo(res.group);
       }
     } catch (e) {
-      console.error('Failed to load group members:', e);
     }
   };
 
@@ -77,7 +77,6 @@ export default function MessagesView({ topic, topicName, user, isGroup, groupId,
       const peer = friends.find((friend) => friend.id === peerId);
       if (peer) setPeerProfile(peer);
     } catch (e) {
-      console.error('Failed to load peer profile:', e);
     }
   };
 
@@ -104,13 +103,9 @@ export default function MessagesView({ topic, topicName, user, isGroup, groupId,
           created_at: new Date().toISOString(),
         });
 
-        console.log('[WS收到消息]', 'seq:', serverMsg.id, 'seq_id:', serverMsg.seq_id, 'type:', serverMsg.type, 'content:', serverMsg.content?.substring(0, 30));
-
         setMessages((prev) => {
-          console.log('[WS合并前] 当前消息数:', prev.length, '最后3条seq:', prev.slice(-3).map(m => m.seq_id || m.id));
           // Deduplicate by seq ID
           if (prev.some((m) => m.id === serverMsg.id)) {
-            console.log('[WS去重] 消息已存在:', serverMsg.id);
             return prev;
           }
           // If this is our own message echoed back, replace the optimistic entry
@@ -175,7 +170,6 @@ export default function MessagesView({ topic, topicName, user, isGroup, groupId,
         setHasMoreHistory(normalizedMessages.length === PAGE_SIZE);
       }
     } catch (e) {
-      console.error('Failed to load messages:', e);
     }
   };
 
@@ -198,7 +192,6 @@ export default function MessagesView({ topic, topicName, user, isGroup, groupId,
       setHistoryOffset((prev) => prev + older.length);
       setHasMoreHistory(older.length === PAGE_SIZE);
     } catch (e) {
-      console.error('Failed to load older messages:', e);
     } finally {
       setLoadingOlder(false);
     }
@@ -228,9 +221,7 @@ export default function MessagesView({ topic, topicName, user, isGroup, groupId,
 
     // Send via REST API (unified with Code Mode)
     try {
-      console.log('[发送消息] 使用REST API:', topic, text.substring(0, 30));
       const result = await api.sendMessage(topic, text, currentReplyTo ? currentReplyTo.id : undefined);
-      console.log('[发送成功]', result);
       
       // Update optimistic message with real database sequence ID
       if (result && (result.seq_id || result.id)) {
@@ -251,7 +242,6 @@ export default function MessagesView({ topic, topicName, user, isGroup, groupId,
         });
       }
     } catch (err) {
-      console.error('[发送失败]', err);
     }
   }, [input, topic, user.uid, replyTo]);
 
@@ -380,7 +370,6 @@ export default function MessagesView({ topic, topicName, user, isGroup, groupId,
         });
       }
     } catch (err) {
-      console.error('Upload failed:', err);
       // Fallback: If the server returns a raw Nginx HTML 413 instead of JSON, 
       // res.json() will throw a generic SyntaxError. We explicitly alert the user.
       const errorMsg = err.message.includes('Unexpected token') || err.message.includes('JSON')
@@ -397,11 +386,6 @@ export default function MessagesView({ topic, topicName, user, isGroup, groupId,
     return m ? (m.display_name || m.username) : `usr${fromUid}`;
   };
 
-  // Find the replied-to message
-  const getReplyMessage = (replyToId) => {
-    if (!replyToId) return null;
-    return messages.find((m) => m.id === replyToId) || null;
-  };
 
   const filteredMembers = members.filter((m) => {
     if (m.user_id === user.uid) return false;
@@ -420,6 +404,15 @@ export default function MessagesView({ topic, topicName, user, isGroup, groupId,
     });
     return map;
   }, [members]);
+
+
+  const messageById = useMemo(() => {
+    const map = new Map();
+    messages.forEach((message) => {
+      map.set(message.id, message);
+    });
+    return map;
+  }, [messages]);
 
   const getSender = (msg) => {
     if (msg.from_uid === user.uid) {
@@ -470,7 +463,13 @@ export default function MessagesView({ topic, topicName, user, isGroup, groupId,
         }
         // Recalculate isConsecutive in case a working block just processed
         const textIsConsecutive = (prevSenderUid === senderUid && (msgTime - prevTime < 5 * 60 * 1000));
-        groups.push({ type: 'text', message: msg, sender: getSender(msg), isConsecutive: textIsConsecutive });
+        groups.push({
+          type: 'text',
+          message: msg,
+          sender: getSender(msg),
+          replyMessage: msg.reply_to ? (messageById.get(msg.reply_to) || null) : null,
+          isConsecutive: textIsConsecutive,
+        });
         prevSenderUid = senderUid;
         prevTime = msgTime;
       }
@@ -481,7 +480,7 @@ export default function MessagesView({ topic, topicName, user, isGroup, groupId,
     }
 
     return groups;
-  }, [messages, user.uid, isGroup, memberMap, peerProfile, topicName, topic, topicAvatarUrl]);
+  }, [messages, user.uid, isGroup, memberMap, messageById, peerProfile, topicName, topic, topicAvatarUrl]);
 
   const handleGroupSaved = (updatedGroup) => {
     setShowGroupSettings(false);
@@ -521,7 +520,7 @@ export default function MessagesView({ topic, topicName, user, isGroup, groupId,
         <div className="v3-header-actions">
           {isGroup && (
             <button className="v3-action-btn" onClick={() => setShowGroupSettings(true)} title={t('group_settings')}>
-              ⋯
+              <MoreHorizontal size={16} />
             </button>
           )}
         </div>
@@ -544,9 +543,10 @@ export default function MessagesView({ topic, topicName, user, isGroup, groupId,
           if (group.type === 'working') {
             if (!showThinking) return null;
             return (
-              <div key={i} className="oc-working-group">
+              <div key={group.messages[0].id || i} className="oc-working-group">
                 <ChatMessage
-                  message={{ ...group.messages[0], _working: group.messages }}
+                  message={group.messages[0]}
+                  workingMessages={group.messages}
                   isSelf={group.messages[0].from_uid === user.uid}
                   isGroup={isGroup}
                   senderName={group.sender.name}
@@ -567,7 +567,7 @@ export default function MessagesView({ topic, topicName, user, isGroup, groupId,
               senderName={group.sender.name}
               senderAvatarUrl={group.sender.avatarUrl}
               senderIsBot={group.sender.isBot}
-              replyMessage={getReplyMessage(group.message.reply_to)}
+              replyMessage={group.replyMessage}
               onReply={() => setReplyTo(group.message)}
               showThinking={showThinking}
               isConsecutive={group.isConsecutive}
