@@ -74,6 +74,64 @@ function groupBlocks(messages) {
   return items;
 }
 
+function groupContentBlocks(blocks) {
+  const items = [];
+  const pendingTools = {};
+
+  for (let i = 0; i < blocks.length; i++) {
+    const block = blocks[i];
+    if (block.type === 'thinking') {
+      items.push({ type: 'thinking', text: block.thinking || block.text || block.content || '' });
+      continue;
+    }
+    if (block.type === 'tool_use') {
+      const toolId = block.id || block.tool_use_id;
+      const pair = {
+        type: 'tool_pair',
+        name: block.name || 'Tool',
+        input: block.input,
+        result: null,
+        isError: false,
+        id: toolId,
+      };
+      if (toolId) pendingTools[toolId] = pair;
+      items.push(pair);
+      continue;
+    }
+    if (block.type === 'tool_result') {
+      const toolId = block.tool_use_id || block.id;
+      const resultText = block.content || block.text || '';
+      let matched = false;
+      if (toolId && pendingTools[toolId]) {
+        pendingTools[toolId].result = resultText;
+        pendingTools[toolId].isError = !!block.is_error;
+        matched = true;
+      } else {
+        for (const item of items) {
+          if (item.type === 'tool_pair' && item.result === null) {
+            item.result = resultText;
+            item.isError = !!block.is_error;
+            matched = true;
+            break;
+          }
+        }
+      }
+      if (!matched) {
+        items.push({ type: 'tool_result_orphan', content: resultText, isError: !!block.is_error });
+      }
+    }
+  }
+
+  return items;
+}
+
+function escapeHtml(text) {
+  return String(text)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+}
+
 function WorkingProcess({ blocks }) {
   const [open, setOpen] = useState(false);
   if (!blocks || blocks.length === 0) return null;
@@ -136,15 +194,25 @@ function WorkingProcess({ blocks }) {
 export default function ChatMessage({ message, isSelf, isGroup, senderName, senderAvatarUrl, senderIsBot, replyMessage, onReply, showThinking = true, isConsecutive }) {
   const content = message.content;
   const workingMessages = message._working || [];
-  const workingBlocks = workingMessages.length > 0 ? groupBlocks(workingMessages) : [];
-  const hasText = typeof content === 'string' ? content.trim().length > 0 : (content != null);
+  const storedBlocks = Array.isArray(message.content_blocks) ? message.content_blocks : [];
+  const workingBlocks = workingMessages.length > 0
+    ? groupBlocks(workingMessages)
+    : storedBlocks.length > 0
+      ? groupContentBlocks(storedBlocks)
+      : [];
+  const blockText = storedBlocks
+    .filter((block) => block.type === 'text' && block.text)
+    .map((block) => block.text)
+    .join('\n\n');
+  const renderedTextContent = storedBlocks.length > 0 ? blockText : content;
+  const hasText = typeof renderedTextContent === 'string' ? renderedTextContent.trim().length > 0 : (renderedTextContent != null);
 
   if (!hasText && workingBlocks.length === 0) return null;
 
   let parsed = null;
-  if (typeof content === 'object' && content !== null && content.type) {
+  if (storedBlocks.length === 0 && typeof content === 'object' && content !== null && content.type) {
     parsed = content;
-  } else if (typeof content === 'string') {
+  } else if (storedBlocks.length === 0 && typeof content === 'string') {
     try {
       const obj = JSON.parse(content);
       if (obj && obj.type) parsed = obj;
@@ -197,9 +265,9 @@ export default function ChatMessage({ message, isSelf, isGroup, senderName, send
 
         {!isSelf && showThinking && <WorkingProcess blocks={workingBlocks} />}
 
-        {hasText && workingBlocks.length === 0 && (
+        {hasText && (
           <div style={{lineHeight: 1.46}}>
-            {parsed ? <RichContent content={parsed} /> : <TextContent content={content} isGroup={isGroup} />}
+            {parsed ? <RichContent content={parsed} /> : <TextContent content={renderedTextContent} isGroup={isGroup} />}
           </div>
         )}
       </div>
@@ -215,7 +283,7 @@ function TextContent({ content, isGroup }) {
 
   if (hasMarkdown) {
     try {
-      const html = marked.parse(text);
+      const html = marked.parse(escapeHtml(text));
       return <div dangerouslySetInnerHTML={{ __html: html }} className="oc-markdown" />;
     } catch (e) {
       console.error('Markdown parse error:', e);

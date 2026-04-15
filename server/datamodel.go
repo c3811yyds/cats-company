@@ -1,6 +1,8 @@
 // Package server defines the wire protocol data model for Cats Company.
 package server
 
+import "github.com/openchat/openchat/server/store/types"
+
 // ClientMessage is the top-level client-to-server message envelope.
 type ClientMessage struct {
 	Hi      *MsgClientHi      `json:"hi,omitempty"`
@@ -104,12 +106,18 @@ type MsgServerCtrl struct {
 }
 
 type MsgServerData struct {
-	Topic    string      `json:"topic"`
-	From     string      `json:"from,omitempty"`
-	SeqID    int         `json:"seq"`
-	Content  interface{} `json:"content"`
-	ReplyTo  int         `json:"reply_to,omitempty"`
-	Mentions []string    `json:"mentions,omitempty"` // @mentioned user IDs (e.g., ["usr123"])
+	Topic         string                 `json:"topic"`
+	From          string                 `json:"from,omitempty"`
+	SeqID         int                    `json:"seq"`
+	Content       interface{}            `json:"content"`
+	Type          string                 `json:"type,omitempty"`
+	MsgType       string                 `json:"msg_type,omitempty"`
+	Metadata      map[string]interface{} `json:"metadata,omitempty"`
+	ContentBlocks []types.ContentBlock   `json:"content_blocks,omitempty"`
+	Mode          string                 `json:"mode,omitempty"`
+	Role          string                 `json:"role,omitempty"`
+	ReplyTo       int                    `json:"reply_to,omitempty"`
+	Mentions      []string               `json:"mentions,omitempty"` // @mentioned user IDs (e.g., ["usr123"])
 }
 
 type MsgServerPres struct {

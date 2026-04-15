@@ -100,11 +100,31 @@ export const api = {
 
   // Send message via REST
   sendMessage: (topicId, content, replyTo) => {
-    const payload = {
-      topic_id: topicId,
-      type: 'text',
-      content: typeof content === 'string' ? content : JSON.stringify(content),
-    };
+    const payload = { topic_id: topicId };
+
+    if (typeof content === 'string') {
+      payload.type = 'text';
+      payload.content = content;
+    } else if (content && typeof content === 'object') {
+      payload.type = content.type || content.msg_type || 'text';
+      if (Array.isArray(content.content_blocks) && content.content_blocks.length > 0) {
+        payload.content_blocks = content.content_blocks;
+      }
+      if (content.mode) payload.mode = content.mode;
+      if (content.role) payload.role = content.role;
+      if (content.metadata) payload.metadata = content.metadata;
+      if (typeof content.content === 'string') {
+        payload.content = content.content;
+      } else if (content.payload || content.type || content.metadata) {
+        payload.content = JSON.stringify(content);
+      } else {
+        payload.content = JSON.stringify(content);
+      }
+    } else {
+      payload.type = 'text';
+      payload.content = String(content ?? '');
+    }
+
     if (replyTo) payload.reply_to = replyTo;
     return request('POST', '/api/messages/send', payload);
   },

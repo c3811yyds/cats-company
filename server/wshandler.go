@@ -422,6 +422,8 @@ func (h *Hub) handlePub(client *Client, msg *MsgClientPub) {
 			From:    formatUID(uid),
 			SeqID:   int(msgID),
 			Content: msg.Content, // preserve original structure
+			Type:    msgType,
+			MsgType: msgType,
 			ReplyTo: msg.ReplyTo,
 		},
 	}
@@ -499,6 +501,8 @@ func (h *Hub) handleGroupPub(client *Client, msg *MsgClientPub, topic, content, 
 			From:     formatUID(uid),
 			SeqID:    int(msgID),
 			Content:  msg.Content,
+			Type:     msgType,
+			MsgType:  msgType,
 			ReplyTo:  msg.ReplyTo,
 			Mentions: mentions,
 		},
@@ -588,10 +592,15 @@ func (h *Hub) handleGet(client *Client, msg *MsgClientGet) {
 		for _, m := range msgs {
 			h.SendToClient(client, &ServerMessage{
 				Data: &MsgServerData{
-					Topic:   m.TopicID,
-					From:    formatUID(m.FromUID),
-					SeqID:   int(m.ID),
-					Content: m.Content,
+					Topic:         m.TopicID,
+					From:          formatUID(m.FromUID),
+					SeqID:         int(m.ID),
+					Content:       decodeStoredContent(m.Content),
+					Type:          inferDisplayTypeFromStoredMessage(m.MsgType, m.Content, m.ContentBlocks),
+					MsgType:       m.MsgType,
+					ContentBlocks: m.ContentBlocks,
+					Mode:          m.Mode,
+					Role:          m.Role,
 				},
 			})
 		}

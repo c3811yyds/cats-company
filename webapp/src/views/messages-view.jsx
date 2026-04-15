@@ -87,19 +87,22 @@ export default function MessagesView({ topic, topicName, user, isGroup, groupId,
       // New message from server
       if (msg.data && msg.data.topic === topic) {
         const fromUid = parseUid(msg.data.from);
-        const serverMsg = {
+        const serverMsg = normalizeIncomingMessage({
           id: msg.data.seq_id || msg.data.seq,
           seq_id: msg.data.seq_id || msg.data.seq,
           topic_id: msg.data.topic,
           from_uid: fromUid,
           from_name: msg.data.from,
           content: msg.data.content,
-          type: msg.data.type || 'text',
+          content_blocks: msg.data.content_blocks,
+          mode: msg.data.mode,
+          role: msg.data.role,
+          type: msg.data.type,
           metadata: msg.data.metadata || null,
-          msg_type: 'text',
+          msg_type: msg.data.msg_type || msg.data.type || 'text',
           reply_to: msg.data.reply_to || 0,
           created_at: new Date().toISOString(),
-        };
+        });
 
         console.log('[WS收到消息]', 'seq:', serverMsg.id, 'seq_id:', serverMsg.seq_id, 'type:', serverMsg.type, 'content:', serverMsg.content?.substring(0, 30));
 
@@ -166,9 +169,10 @@ export default function MessagesView({ topic, topicName, user, isGroup, groupId,
     try {
       const res = await api.getMessages(topic, PAGE_SIZE, 0, true);
       if (res.messages) {
-        setMessages(res.messages);
-        setHistoryOffset(res.messages.length);
-        setHasMoreHistory(res.messages.length === PAGE_SIZE);
+        const normalizedMessages = res.messages.map(normalizeIncomingMessage);
+        setMessages(normalizedMessages);
+        setHistoryOffset(normalizedMessages.length);
+        setHasMoreHistory(normalizedMessages.length === PAGE_SIZE);
       }
     } catch (e) {
       console.error('Failed to load messages:', e);
@@ -189,7 +193,7 @@ export default function MessagesView({ topic, topicName, user, isGroup, groupId,
     setLoadingOlder(true);
     try {
       const res = await api.getMessages(topic, PAGE_SIZE, historyOffset, true);
-      const older = res.messages || [];
+      const older = (res.messages || []).map(normalizeIncomingMessage);
       setMessages((prev) => mergeMessages(older, prev));
       setHistoryOffset((prev) => prev + older.length);
       setHasMoreHistory(older.length === PAGE_SIZE);
@@ -658,6 +662,34 @@ export default function MessagesView({ topic, topicName, user, isGroup, groupId,
       )}
     </>
   );
+}
+
+function normalizeIncomingMessage(message) {
+  const normalized = { ...message };
+  normalized.content_blocks = Array.isArray(message?.content_blocks) ? message.content_blocks : [];
+  normalized.metadata = message?.metadata || null;
+  normalized.msg_type = message?.msg_type || 'text';
+
+  let inferredType = message?.type;
+  if (!inferredType && message?.content && typeof message.content === 'object' && message.content.type) {
+    inferredType = message.content.type;
+  }
+  if (!inferredType && typeof message?.content === 'string') {
+    try {
+      const parsed = JSON.parse(message.content);
+      if (parsed && typeof parsed === 'object' && parsed.type) {
+        inferredType = parsed.type;
+      }
+    } catch (err) {
+      // plain text payload
+    }
+  }
+  if (!inferredType) {
+    inferredType = normalized.msg_type || 'text';
+  }
+
+  normalized.type = inferredType;
+  return normalized;
 }
 
 // Parse "usr123" -> 123

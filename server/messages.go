@@ -3,8 +3,10 @@ package server
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/openchat/openchat/server/db/mysql"
 	"github.com/openchat/openchat/server/store/types"
@@ -23,14 +25,26 @@ func NewMessageHandler(db *mysql.Adapter, hub *Hub) *MessageHandler {
 
 // SendMessageRequest is the JSON body for sending a message.
 type SendMessageRequest struct {
-	TopicID       string               `json:"topic_id"`
-	Content       string               `json:"content,omitempty"`
-	ContentBlocks []types.ContentBlock `json:"content_blocks,omitempty"`
-	MsgType       string               `json:"msg_type,omitempty"`
-	Type          string               `json:"type,omitempty"`
-	Mode          string               `json:"mode,omitempty"`
-	Role          string               `json:"role,omitempty"`
-	ReplyTo       int                  `json:"reply_to,omitempty"`
+	TopicID       string                 `json:"topic_id"`
+	Content       json.RawMessage        `json:"content,omitempty"`
+	ContentBlocks []types.ContentBlock   `json:"content_blocks,omitempty"`
+	Metadata      map[string]interface{} `json:"metadata,omitempty"`
+	MsgType       string                 `json:"msg_type,omitempty"`
+	Type          string                 `json:"type,omitempty"`
+	Mode          string                 `json:"mode,omitempty"`
+	Role          string                 `json:"role,omitempty"`
+	ReplyTo       int                    `json:"reply_to,omitempty"`
+}
+
+type normalizedMessagePayload struct {
+	StoredContent  string
+	DisplayContent interface{}
+	StoredType     string
+	DisplayType    string
+	ContentBlocks  []types.ContentBlock
+	Metadata       map[string]interface{}
+	Mode           string
+	Role           string
 }
 
 // HandleSendMessage handles POST /api/messages/send
@@ -43,17 +57,10 @@ func (h *MessageHandler) HandleSendMessage(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	if (req.Content == "" && len(req.ContentBlocks) == 0) || req.TopicID == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "topic_id and content/content_blocks required"})
+	payload, err := normalizeMessageRequest(&req)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
-	}
-
-	msgType := req.MsgType
-	if msgType == "" {
-		msgType = req.Type
-	}
-	if msgType == "" {
-		msgType = "text"
 	}
 
 	if !isGroupTopic(req.TopicID) {
@@ -62,19 +69,16 @@ func (h *MessageHandler) HandleSendMessage(w http.ResponseWriter, r *http.Reques
 	}
 
 	var id int64
-	var err error
-
-	// Use new API if content_blocks provided.
-	if len(req.ContentBlocks) > 0 {
-		mode := req.Mode
+	if len(payload.ContentBlocks) > 0 {
+		mode := payload.Mode
 		if mode == "" {
 			mode = "code"
 		}
-		id, err = h.db.SaveMessageWithBlocks(req.TopicID, uid, req.Content, req.ContentBlocks, mode, req.Role, msgType)
+		id, err = h.db.SaveMessageWithBlocks(req.TopicID, uid, payload.StoredContent, payload.ContentBlocks, mode, payload.Role, payload.StoredType)
 	} else if req.ReplyTo > 0 {
-		id, err = h.db.SaveMessageWithReply(req.TopicID, uid, req.Content, msgType, int64(req.ReplyTo))
+		id, err = h.db.SaveMessageWithReply(req.TopicID, uid, payload.StoredContent, payload.StoredType, int64(req.ReplyTo))
 	} else {
-		id, err = h.db.SaveMessage(req.TopicID, uid, req.Content, msgType)
+		id, err = h.db.SaveMessage(req.TopicID, uid, payload.StoredContent, payload.StoredType)
 	}
 
 	if err != nil {
@@ -87,49 +91,60 @@ func (h *MessageHandler) HandleSendMessage(w http.ResponseWriter, r *http.Reques
 		"seq_id":   id,
 		"topic_id": req.TopicID,
 		"from_uid": uid,
-		"msg_type": msgType,
+		"msg_type": payload.StoredType,
+		"type":     payload.DisplayType,
 		"reply_to": req.ReplyTo,
 	}
-	if len(req.ContentBlocks) > 0 {
-		resp["content_blocks"] = req.ContentBlocks
-		resp["mode"] = req.Mode
-		resp["role"] = req.Role
-	} else {
-		resp["content"] = req.Content
+	if payload.Metadata != nil {
+		resp["metadata"] = payload.Metadata
+	}
+	if len(payload.ContentBlocks) > 0 {
+		resp["content_blocks"] = payload.ContentBlocks
+		resp["mode"] = payload.Mode
+		resp["role"] = payload.Role
+	}
+	if payload.DisplayContent != nil && payload.DisplayContent != "" {
+		resp["content"] = payload.DisplayContent
 	}
 
-	h.fanoutMessage(uid, &req, id)
+	h.fanoutMessage(uid, req.TopicID, req.ReplyTo, payload, id)
 	writeJSON(w, http.StatusOK, resp)
 }
 
-func (h *MessageHandler) fanoutMessage(uid int64, req *SendMessageRequest, msgID int64) {
-	if h == nil || h.hub == nil || req == nil {
+func (h *MessageHandler) fanoutMessage(uid int64, topicID string, replyTo int, payload *normalizedMessagePayload, msgID int64) {
+	if h == nil || h.hub == nil || payload == nil {
 		return
 	}
 
 	dataMsg := &ServerMessage{
 		Data: &MsgServerData{
-			Topic:   req.TopicID,
-			From:    formatUID(uid),
-			SeqID:   int(msgID),
-			Content: req.Content,
-			ReplyTo: req.ReplyTo,
+			Topic:         topicID,
+			From:          formatUID(uid),
+			SeqID:         int(msgID),
+			Content:       payload.DisplayContent,
+			Type:          payload.DisplayType,
+			MsgType:       payload.StoredType,
+			Metadata:      payload.Metadata,
+			ContentBlocks: payload.ContentBlocks,
+			Mode:          payload.Mode,
+			Role:          payload.Role,
+			ReplyTo:       replyTo,
 		},
 	}
 
-	if isGroupTopic(req.TopicID) {
-		groupID := extractGroupID(req.TopicID)
+	if isGroupTopic(topicID) {
+		groupID := extractGroupID(topicID)
 		if groupID == 0 {
 			return
 		}
-		mentions := parseMentions(req.Content)
+		mentions := parseMentions(payload.DisplayContent)
 		dataMsg.Data.Mentions = mentions
 		h.hub.SendToUserExcept(uid, dataMsg, nil)
 		h.hub.broadcastToGroupWithMentions(groupID, dataMsg, uid, mentions, uid)
 		return
 	}
 
-	peerUID := extractPeerUID(req.TopicID, uid)
+	peerUID := extractPeerUID(topicID, uid)
 	if peerUID == 0 {
 		return
 	}
@@ -138,7 +153,7 @@ func (h *MessageHandler) fanoutMessage(uid int64, req *SendMessageRequest, msgID
 	h.hub.SendToUser(peerUID, dataMsg)
 
 	if senderClient := h.hub.getClient(uid); senderClient != nil && senderClient.accountType == types.AccountBot {
-		h.hub.botStats.RecordSent(uid, req.TopicID)
+		h.hub.botStats.RecordSent(uid, topicID)
 	}
 	if peerClient := h.hub.getClient(peerUID); peerClient != nil && peerClient.accountType == types.AccountBot {
 		h.hub.botStats.RecordRecv(peerUID)
@@ -172,4 +187,203 @@ func (h *MessageHandler) HandleGetMessages(w http.ResponseWriter, r *http.Reques
 	}
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{"messages": msgs})
+}
+
+func normalizeMessageRequest(req *SendMessageRequest) (*normalizedMessagePayload, error) {
+	if req == nil || strings.TrimSpace(req.TopicID) == "" {
+		return nil, errors.New("topic_id required")
+	}
+
+	storedContent, displayContent := normalizeRawContent(req.Content)
+	displayType := firstNonEmpty(strings.TrimSpace(req.Type), strings.TrimSpace(req.MsgType))
+	if displayType == "" {
+		displayType = inferDisplayTypeFromContent(displayContent)
+	}
+	if displayType == "" {
+		displayType = "text"
+	}
+
+	blocks := req.ContentBlocks
+	mode := strings.TrimSpace(req.Mode)
+	role := strings.TrimSpace(req.Role)
+	if len(blocks) == 0 && isStructuredDisplayType(displayType) {
+		blocks = buildStructuredContentBlocks(displayType, displayContent, req.Metadata)
+		if mode == "" {
+			mode = "code"
+		}
+		if role == "" {
+			role = "assistant"
+		}
+	}
+
+	if storedContent == "" && len(blocks) == 0 {
+		return nil, errors.New("topic_id and content/content_blocks required")
+	}
+
+	return &normalizedMessagePayload{
+		StoredContent:  storedContent,
+		DisplayContent: displayContent,
+		StoredType:     normalizeStoredMsgType(displayType),
+		DisplayType:    displayType,
+		ContentBlocks:  blocks,
+		Metadata:       req.Metadata,
+		Mode:           mode,
+		Role:           role,
+	}, nil
+}
+
+func normalizeRawContent(raw json.RawMessage) (string, interface{}) {
+	trimmed := strings.TrimSpace(string(raw))
+	if trimmed == "" || trimmed == "null" {
+		return "", ""
+	}
+
+	var parsed interface{}
+	if err := json.Unmarshal(raw, &parsed); err == nil {
+		switch value := parsed.(type) {
+		case string:
+			return value, value
+		case nil:
+			return "", ""
+		default:
+			return trimmed, value
+		}
+	}
+
+	return trimmed, trimmed
+}
+
+func decodeStoredContent(content string) interface{} {
+	trimmed := strings.TrimSpace(content)
+	if trimmed == "" {
+		return ""
+	}
+
+	var parsed interface{}
+	if err := json.Unmarshal([]byte(trimmed), &parsed); err == nil {
+		return parsed
+	}
+
+	return content
+}
+
+func inferDisplayTypeFromStoredMessage(msgType, content string, blocks []types.ContentBlock) string {
+	if msgType != "" && msgType != "text" {
+		return msgType
+	}
+	if inferred := inferDisplayTypeFromContent(decodeStoredContent(content)); inferred != "" {
+		return inferred
+	}
+	if len(blocks) > 0 {
+		return "text"
+	}
+	return "text"
+}
+
+func inferDisplayTypeFromContent(content interface{}) string {
+	if rich, ok := content.(map[string]interface{}); ok {
+		if value, ok := rich["type"].(string); ok && value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func normalizeStoredMsgType(displayType string) string {
+	switch displayType {
+	case "image", "voice", "file":
+		return displayType
+	default:
+		return "text"
+	}
+}
+
+func isStructuredDisplayType(displayType string) bool {
+	switch displayType {
+	case "thinking", "tool_use", "tool_result":
+		return true
+	default:
+		return false
+	}
+}
+
+func buildStructuredContentBlocks(displayType string, content interface{}, metadata map[string]interface{}) []types.ContentBlock {
+	text := normalizeContentText(content)
+	switch displayType {
+	case "thinking":
+		return []types.ContentBlock{{Type: "thinking", Thinking: text}}
+	case "tool_use":
+		return []types.ContentBlock{{
+			Type:  "tool_use",
+			ID:    firstMetadataString(metadata, "id", "tool_call_id", "tool_use_id"),
+			Name:  text,
+			Input: metadataMap(metadata, "input"),
+		}}
+	case "tool_result":
+		return []types.ContentBlock{{
+			Type:      "tool_result",
+			ToolUseID: firstMetadataString(metadata, "tool_use_id", "id", "tool_call_id"),
+			Content:   text,
+			IsError:   metadataBool(metadata, "is_error"),
+		}}
+	default:
+		return nil
+	}
+}
+
+func normalizeContentText(content interface{}) string {
+	switch value := content.(type) {
+	case string:
+		return value
+	case map[string]interface{}:
+		if text, ok := value["text"].(string); ok {
+			return text
+		}
+		bytes, _ := json.Marshal(value)
+		return string(bytes)
+	default:
+		bytes, _ := json.Marshal(value)
+		return string(bytes)
+	}
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return strings.TrimSpace(value)
+		}
+	}
+	return ""
+}
+
+func firstMetadataString(metadata map[string]interface{}, keys ...string) string {
+	if metadata == nil {
+		return ""
+	}
+	for _, key := range keys {
+		if value, ok := metadata[key].(string); ok && strings.TrimSpace(value) != "" {
+			return strings.TrimSpace(value)
+		}
+	}
+	return ""
+}
+
+func metadataMap(metadata map[string]interface{}, key string) map[string]interface{} {
+	if metadata == nil {
+		return nil
+	}
+	if value, ok := metadata[key].(map[string]interface{}); ok {
+		return value
+	}
+	return nil
+}
+
+func metadataBool(metadata map[string]interface{}, key string) bool {
+	if metadata == nil {
+		return false
+	}
+	if value, ok := metadata[key].(bool); ok {
+		return value
+	}
+	return false
 }
