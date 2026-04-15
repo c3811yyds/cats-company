@@ -229,13 +229,17 @@ func (a *Adapter) DeleteGroup(groupID int64) error {
 
 	topicID := fmt.Sprintf("grp_%d", groupID)
 
-	// Delete messages for this topic
-	_, _ = tx.Exec("DELETE FROM messages WHERE topic_id = ?", topicID)
+	// Delete messages for this topic.
+	if _, err := tx.Exec("DELETE FROM messages WHERE topic_id = ?", topicID); err != nil {
+		return fmt.Errorf("delete group messages: %w", err)
+	}
 
-	// Delete the topic
-	_, _ = tx.Exec("DELETE FROM topics WHERE id = ?", topicID)
+	// Delete the topic so conversation metadata is removed too.
+	if _, err := tx.Exec("DELETE FROM topics WHERE id = ?", topicID); err != nil {
+		return fmt.Errorf("delete group topic: %w", err)
+	}
 
-	// Delete group (cascades to group_members)
+	// Delete group (cascades to group_members).
 	_, err = tx.Exec("DELETE FROM `groups` WHERE id = ?", groupID)
 	if err != nil {
 		return fmt.Errorf("delete group: %w", err)

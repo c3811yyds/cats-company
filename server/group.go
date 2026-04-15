@@ -245,9 +245,9 @@ func (h *GroupHandler) HandleInviteMembers(w http.ResponseWriter, r *http.Reques
 
 	// Notify new members
 	h.notifyGroupEvent(req.GroupID, "members_invited", map[string]interface{}{
-		"group_id":  req.GroupID,
-		"invited":   req.UserIDs,
-		"by":        uid,
+		"group_id": req.GroupID,
+		"invited":  req.UserIDs,
+		"by":       uid,
 	})
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{"added": added})
@@ -348,15 +348,23 @@ func (h *GroupHandler) HandleDisbandGroup(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	// Notify before deleting
-	h.notifyGroupEvent(req.GroupID, "group_disbanded", map[string]interface{}{
-		"group_id": req.GroupID,
-	})
+	members, err := h.db.GetGroupMembers(req.GroupID)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to load group members"})
+		return
+	}
+
+	memberIDs := make([]int64, 0, len(members))
+	for _, member := range members {
+		memberIDs = append(memberIDs, member.UserID)
+	}
 
 	if err := h.db.DeleteGroup(req.GroupID); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to disband"})
 		return
 	}
+
+	h.notifyGroupUserIDs(memberIDs, req.GroupID, "group_disbanded")
 
 	writeJSON(w, http.StatusOK, map[string]string{"status": "disbanded"})
 }
@@ -409,6 +417,14 @@ func (h *GroupHandler) notifyGroupEvent(groupID int64, event string, data map[st
 	if err != nil {
 		return
 	}
+	userIDs := make([]int64, 0, len(members))
+	for _, member := range members {
+		userIDs = append(userIDs, member.UserID)
+	}
+	h.notifyGroupUserIDs(userIDs, groupID, event)
+}
+
+func (h *GroupHandler) notifyGroupUserIDs(userIDs []int64, groupID int64, event string) {
 	msg := &ServerMessage{
 		Pres: &MsgServerPres{
 			Topic: fmt.Sprintf("grp_%d", groupID),
@@ -416,8 +432,8 @@ func (h *GroupHandler) notifyGroupEvent(groupID int64, event string, data map[st
 			Src:   fmt.Sprintf("grp_%d", groupID),
 		},
 	}
-	for _, m := range members {
-		h.hub.SendToUser(m.UserID, msg)
+	for _, userID := range userIDs {
+		h.hub.SendToUser(userID, msg)
 	}
 }
 
@@ -509,9 +525,9 @@ func (h *GroupHandler) HandleSetAnnouncement(w http.ResponseWriter, r *http.Requ
 	}
 
 	h.notifyGroupEvent(req.GroupID, "announcement_updated", map[string]interface{}{
-		"group_id":      req.GroupID,
-		"announcement":  req.Announcement,
-		"by":            uid,
+		"group_id":     req.GroupID,
+		"announcement": req.Announcement,
+		"by":           uid,
 	})
 
 	writeJSON(w, http.StatusOK, map[string]string{"status": "updated"})

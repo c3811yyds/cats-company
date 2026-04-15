@@ -5,7 +5,7 @@ import CreateGroup from '../widgets/create-group';
 import AddFriend from '../widgets/add-friend';
 import FriendRequest from '../widgets/friend-request';
 import AgentStoreModal from '../widgets/agent-store-modal';
-import { Users, UserPlus, Zap, Bot } from 'lucide-react';
+import { Users, UserPlus, Zap, Bot, Trash2 } from 'lucide-react';
 
 export default function ChatListView({ activeTopic, onSelectTopic, user, onlineUsers }) {
   const [chats, setChats] = useState([]);
@@ -14,6 +14,7 @@ export default function ChatListView({ activeTopic, onSelectTopic, user, onlineU
   const [pending, setPending] = useState([]);
   const [bots, setBots] = useState([]);
   const [search, setSearch] = useState('');
+  const [deletingTopicId, setDeletingTopicId] = useState('');
   const [showCreateGroup, setShowCreateGroup] = useState(false);
   const [showAddFriend, setShowAddFriend] = useState(false);
   const [showAgentStore, setShowAgentStore] = useState(false);
@@ -91,6 +92,30 @@ export default function ChatListView({ activeTopic, onSelectTopic, user, onlineU
   const handleGroupCreated = () => loadAll();
   const handleAccept = async (userId) => { await api.acceptFriend(userId); loadAll(); };
   const handleReject = async (userId) => { await api.rejectFriend(userId); loadAll(); };
+  const groupOwnerById = new Map(groups.map((group) => [String(group.id), String(group.owner_id)]));
+
+  const handleDeleteGroup = async ({ groupId, topicId, name }) => {
+    if (!groupId || !topicId) return;
+
+    const confirmed = window.confirm(
+      `Delete group "${name}" permanently?\n\nThis will remove the group, all members, and all chat history.`
+    );
+    if (!confirmed) return;
+
+    setDeletingTopicId(topicId);
+    try {
+      await api.disbandGroup(groupId);
+      if (activeTopic === topicId) {
+        onSelectTopic(null);
+      }
+      await loadAll();
+      window.dispatchEvent(new Event('cc:data-changed'));
+    } catch (err) {
+      window.alert(err.message || 'Failed to delete group.');
+    } finally {
+      setDeletingTopicId('');
+    }
+  };
 
   const lowerSearch = search.toLowerCase();
   const filteredChats = chats.filter(c => c.name.toLowerCase().includes(lowerSearch));
@@ -137,6 +162,7 @@ export default function ChatListView({ activeTopic, onSelectTopic, user, onlineU
         ) : (
           filteredChats.map((chat) => {
             const isOnline = !chat.isGroup && ((onlineUsers && onlineUsers[chat.friendId]) || chat.isOnline);
+            const canDeleteGroup = chat.isGroup && groupOwnerById.get(String(chat.groupId)) === String(user.uid);
             return (
               <div
                 key={chat.id}
@@ -151,7 +177,25 @@ export default function ChatListView({ activeTopic, onSelectTopic, user, onlineU
                 })}
               >
                 <span className="prefix" style={{fontSize: '18px'}}>{chat.isGroup ? '#' : (isOnline ? '○' : '●')}</span>
-                <span>{chat.name}</span>
+                <span className="v3-chat-item-label">{chat.name}</span>
+                {canDeleteGroup && (
+                  <button
+                    type="button"
+                    className="v3-chat-item-delete"
+                    disabled={deletingTopicId === chat.id}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      handleDeleteGroup({
+                        groupId: chat.groupId,
+                        topicId: chat.id,
+                        name: chat.name,
+                      });
+                    }}
+                    title="Delete group"
+                  >
+                    <Trash2 size={14} />
+                  </button>
+                )}
                 {!chat.isGroup && <span className={`v3-status-dot ${isOnline ? 'online' : 'offline'}`} style={{marginLeft: 'auto'}} />}
               </div>
             );
@@ -197,7 +241,25 @@ export default function ChatListView({ activeTopic, onSelectTopic, user, onlineU
             {filteredGroups.map(group => (
               <div key={`grp_${group.id}`} className="v3-chat-item" onClick={() => onSelectTopic({ topicId: `grp_${group.id}`, name: group.name, isGroup: true, groupId: group.id, avatar_url: group.avatar_url })}>
                 <span className="prefix" style={{fontSize: '18px'}}>#</span>
-                <span>{group.name}</span>
+                <span className="v3-chat-item-label">{group.name}</span>
+                {String(group.owner_id) === String(user.uid) && (
+                  <button
+                    type="button"
+                    className="v3-chat-item-delete"
+                    disabled={deletingTopicId === `grp_${group.id}`}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      handleDeleteGroup({
+                        groupId: group.id,
+                        topicId: `grp_${group.id}`,
+                        name: group.name,
+                      });
+                    }}
+                    title="Delete group"
+                  >
+                    <Trash2 size={14} />
+                  </button>
+                )}
               </div>
             ))}
             {filteredFriends.map(friend => (
