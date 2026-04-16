@@ -12,6 +12,8 @@ const TYPING_TIMEOUT_MS = 10000;
 export default function MessagesView({ topic, topicName, user, isGroup, groupId, topicAvatarUrl, onTopicUpdated }) {
   const [input, setInput] = useState('');
   const [messages, setMessages] = useState([]);
+  const [pendingAttachment, setPendingAttachment] = useState(null);
+  const [isUploadingAttachment, setIsUploadingAttachment] = useState(false);
   const [peerTyping, setPeerTyping] = useState(false);
   const [members, setMembers] = useState([]);
   const [groupInfo, setGroupInfo] = useState(null);
@@ -40,6 +42,8 @@ export default function MessagesView({ topic, topicName, user, isGroup, groupId,
   useEffect(() => {
     if (!topic) return;
     setMessages([]);
+    setPendingAttachment(null);
+    setIsUploadingAttachment(false);
     setPeerTyping(false);
     setReplyTo(null);
     setMembers([]);
@@ -110,7 +114,10 @@ export default function MessagesView({ topic, topicName, user, isGroup, groupId,
           }
           // If this is our own message echoed back, replace the optimistic entry
           if (fromUid === user.uid) {
-            const pendingIdx = prev.findIndex((m) => m._pending && m.content.trim() === serverMsg.content.trim());
+            const serverContentKey = getComparableContent(serverMsg.content);
+            const pendingIdx = prev.findIndex((m) => (
+              m._pending && getComparableContent(m.content) === serverContentKey
+            ));
             if (pendingIdx !== -1) {
               const next = [...prev];
               next[pendingIdx] = serverMsg;
@@ -197,53 +204,107 @@ export default function MessagesView({ topic, topicName, user, isGroup, groupId,
     }
   };
 
+  const finalizeOptimisticMessage = useCallback((tempId, result) => {
+    if (!result || (!result.seq_id && !result.id)) return;
+    setMessages((prev) => {
+      const idx = prev.findIndex((message) => message.id === tempId);
+      if (idx === -1) return prev;
+      const next = [...prev];
+      next[idx] = {
+        ...next[idx],
+        id: result.seq_id || result.id,
+        seq_id: result.seq_id || result.id,
+        _pending: false,
+      };
+      return next.sort((a, b) => (a.seq_id || a.id) - (b.seq_id || b.id));
+    });
+  }, []);
+
+  const removeOptimisticMessage = useCallback((tempId) => {
+    setMessages((prev) => prev.filter((message) => message.id !== tempId));
+  }, []);
+
   const handleSend = useCallback(async () => {
     const text = input.trim();
-    if (!text) return;
+    if (!text && !pendingAttachment) return;
+    if (isUploadingAttachment) return;
+
+    const attachmentToSend = pendingAttachment;
     setInput('');
     const currentReplyTo = replyTo;
     setReplyTo(null);
+    setPendingAttachment(null);
 
-    // Optimistic local append
-    const tempId = Date.now(); // Provide a large positive seq_id so it sorts to the bottom
-    setMessages((prev) => [...prev, {
-      id: tempId,
-      seq_id: tempId,
-      topic_id: topic,
-      from_uid: user.uid,
-      content: text,
-      type: 'text',
-      msg_type: 'text',
-      reply_to: currentReplyTo ? currentReplyTo.id : 0,
-      created_at: new Date().toISOString(),
-      _pending: true,
-    }]);
+    const optimisticMessages = [];
+    const textTempId = text ? Date.now() : null;
+    const attachmentTempId = attachmentToSend ? Date.now() + (text ? 1 : 0) : null;
 
-    // Send via REST API (unified with Code Mode)
-    try {
-      const result = await api.sendMessage(topic, text, currentReplyTo ? currentReplyTo.id : undefined);
-      
-      // Update optimistic message with real database sequence ID
-      if (result && (result.seq_id || result.id)) {
-        setMessages((prev) => {
-          const idx = prev.findIndex(m => m.id === tempId);
-          if (idx !== -1) {
-            const next = [...prev];
-            next[idx] = {
-              ...next[idx],
-              id: result.seq_id || result.id,
-              seq_id: result.seq_id || result.id,
-              _pending: false
-            };
-            // Re-sort to position appropriately
-            return next.sort((a, b) => (a.seq_id || a.id) - (b.seq_id || b.id));
-          }
-          return prev;
-        });
-      }
-    } catch (err) {
+    if (textTempId) {
+      optimisticMessages.push({
+        id: textTempId,
+        seq_id: textTempId,
+        topic_id: topic,
+        from_uid: user.uid,
+        content: text,
+        type: 'text',
+        msg_type: 'text',
+        reply_to: currentReplyTo ? currentReplyTo.id : 0,
+        created_at: new Date().toISOString(),
+        _pending: true,
+      });
     }
-  }, [input, topic, user.uid, replyTo]);
+
+    if (attachmentTempId) {
+      optimisticMessages.push({
+        id: attachmentTempId,
+        seq_id: attachmentTempId,
+        topic_id: topic,
+        from_uid: user.uid,
+        content: attachmentToSend.content,
+        type: attachmentToSend.type,
+        msg_type: attachmentToSend.type,
+        reply_to: currentReplyTo && !text ? currentReplyTo.id : 0,
+        created_at: new Date().toISOString(),
+        _pending: true,
+      });
+    }
+
+    if (optimisticMessages.length > 0) {
+      setMessages((prev) => mergeMessages(prev, optimisticMessages));
+    }
+
+    if (textTempId) {
+      try {
+        const result = await api.sendMessage(topic, text, currentReplyTo ? currentReplyTo.id : undefined);
+        finalizeOptimisticMessage(textTempId, result);
+      } catch (err) {
+        removeOptimisticMessage(textTempId);
+        setInput(text);
+        if (attachmentToSend) {
+          setPendingAttachment(attachmentToSend);
+        }
+        setReplyTo(currentReplyTo);
+        return;
+      }
+    }
+
+    if (attachmentTempId) {
+      try {
+        const result = await api.sendMessage(
+          topic,
+          attachmentToSend.content,
+          !text && currentReplyTo ? currentReplyTo.id : undefined,
+        );
+        finalizeOptimisticMessage(attachmentTempId, result);
+      } catch (err) {
+        removeOptimisticMessage(attachmentTempId);
+        setPendingAttachment(attachmentToSend);
+        if (!text) {
+          setReplyTo(currentReplyTo);
+        }
+      }
+    }
+  }, [finalizeOptimisticMessage, input, isUploadingAttachment, pendingAttachment, removeOptimisticMessage, replyTo, topic, user.uid]);
 
   const handleKeyDown = (e) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -309,19 +370,29 @@ export default function MessagesView({ topic, topicName, user, isGroup, groupId,
       return;
     }
 
-    const formData = new FormData();
-    formData.append('file', file);
-
     try {
+      setIsUploadingAttachment(true);
+      const formData = new FormData();
+      formData.append('file', file);
       const res = await fetch(`${process.env.REACT_APP_API_BASE || ''}/api/upload?type=${type}`, {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${localStorage.getItem('oc_token')}` },
         body: formData,
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error);
+      const raw = await res.text();
+      let data = {};
+      if (raw) {
+        try {
+          data = JSON.parse(raw);
+        } catch (parseErr) {
+          if (!res.ok) {
+            throw new Error(`Upload failed with HTTP ${res.status}`);
+          }
+          throw new Error('Upload failed: invalid server response');
+        }
+      }
+      if (!res.ok) throw new Error(data.error || `Upload failed with HTTP ${res.status}`);
 
-      // Send rich content message via REST API (unified with Code Mode)
       const content = {
         type,
         payload: {
@@ -335,40 +406,13 @@ export default function MessagesView({ topic, topicName, user, isGroup, groupId,
         content.payload.thumbnail = data.url;
       }
 
-      // Optimistic local append for rich media
-      const tempId = Date.now();
-      setMessages((prev) => [...prev, {
-        id: tempId,
-        seq_id: tempId,
-        topic_id: topic,
-        from_uid: user.uid,
-        content: content,
-        type: type,
-        msg_type: type,
-        reply_to: 0,
-        created_at: new Date().toISOString(),
-        _pending: true,
-      }]);
-
-      const result = await api.sendMessage(topic, content);
-      
-      // Update optimistic message with real database sequence ID
-      if (result && (result.seq_id || result.id)) {
-        setMessages((prev) => {
-          const idx = prev.findIndex(m => m.id === tempId);
-          if (idx !== -1) {
-            const next = [...prev];
-            next[idx] = {
-              ...next[idx],
-              id: result.seq_id || result.id,
-              seq_id: result.seq_id || result.id,
-              _pending: false
-            };
-            return next.sort((a, b) => (a.seq_id || a.id) - (b.seq_id || b.id));
-          }
-          return prev;
-        });
-      }
+      setPendingAttachment({
+        type,
+        name: data.name,
+        size: data.size,
+        content,
+      });
+      setTimeout(() => textareaRef.current?.focus(), 0);
     } catch (err) {
       // Fallback: If the server returns a raw Nginx HTML 413 instead of JSON, 
       // res.json() will throw a generic SyntaxError. We explicitly alert the user.
@@ -376,6 +420,8 @@ export default function MessagesView({ topic, topicName, user, isGroup, groupId,
         ? 'Upload failed: Server rejected the file (likely Payload Too Large / 413).'
         : `Upload failed: ${err.message}`;
       window.alert(errorMsg);
+    } finally {
+      setIsUploadingAttachment(false);
     }
   };
 
@@ -617,14 +663,14 @@ export default function MessagesView({ topic, topicName, user, isGroup, groupId,
         <div className="v3-composer-box">
           
           <div className="v3-composer-toolbar">
-            <button className="v3-tool" onClick={() => imageInputRef.current?.click()} title="Upload Image">
+            <button className="v3-tool" onClick={() => imageInputRef.current?.click()} title="Upload Image" type="button">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><circle cx="8.5" cy="8.5" r="1.5"></circle><polyline points="21 15 16 10 5 21"></polyline></svg>
             </button>
-            <button className="v3-tool" onClick={() => fileInputRef.current?.click()} title="Upload File">
+            <button className="v3-tool" onClick={() => fileInputRef.current?.click()} title="Upload File" type="button">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"></path></svg>
             </button>
             <div style={{flex:1}}></div>
-            <button className="v3-tool" style={{ fontWeight: 600 }} onClick={() => { if(isGroup && textareaRef.current) { const pos = textareaRef.current.selectionStart; setInput(input.slice(0,pos) + '@' + input.slice(pos)); textareaRef.current.focus(); } }} title="Mention">@</button>
+            <button className="v3-tool" style={{ fontWeight: 600 }} onClick={() => { if(isGroup && textareaRef.current) { const pos = textareaRef.current.selectionStart; setInput(input.slice(0,pos) + '@' + input.slice(pos)); textareaRef.current.focus(); } }} title="Mention" type="button">@</button>
           </div>
 
           <textarea
@@ -636,13 +682,40 @@ export default function MessagesView({ topic, topicName, user, isGroup, groupId,
             onChange={handleInputChange}
             onKeyDown={handleKeyDown}
           />
+
+          {(isUploadingAttachment || pendingAttachment) && (
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, padding: '10px 12px', marginTop: 10, borderRadius: 10, background: 'rgba(255,255,255,0.04)', border: '1px solid var(--v3-border)', color: 'var(--v3-text-main)' }}>
+              <div style={{ minWidth: 0 }}>
+                <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 2 }}>
+                  {isUploadingAttachment ? 'Uploading attachment...' : pendingAttachment.type === 'image' ? 'Image ready to send' : 'File ready to send'}
+                </div>
+                {!isUploadingAttachment && pendingAttachment && (
+                  <div style={{ fontSize: 12, color: 'var(--v3-text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {pendingAttachment.name}
+                    {pendingAttachment.size ? ` • ${formatFileSize(pendingAttachment.size)}` : ''}
+                  </div>
+                )}
+              </div>
+              {pendingAttachment && !isUploadingAttachment && (
+                <button
+                  className="v3-action-btn"
+                  aria-label="Remove attachment"
+                  onClick={() => setPendingAttachment(null)}
+                  type="button"
+                >
+                  x
+                </button>
+              )}
+            </div>
+          )}
           
           <div className="v3-composer-footer">
             <span><strong>Return</strong> to send, <strong>Shift + Return</strong> to add a new line</span>
             <button
               className="v3-send"
-              disabled={!input.trim()}
+              disabled={isUploadingAttachment || (!input.trim() && !pendingAttachment)}
               onClick={handleSend}
+              type="button"
             >
               <svg width="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3"><path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z"></path></svg>
               <span>{t('chat_send')}</span>
@@ -712,4 +785,32 @@ function mergeMessages(primary, secondary) {
     const bSeq = b.seq_id || b.id;
     return aSeq - bSeq;
   });
+}
+
+function getComparableContent(content) {
+  if (typeof content === 'string') {
+    const trimmed = content.trim();
+    if (!trimmed) return '';
+    try {
+      const parsed = JSON.parse(trimmed);
+      if (parsed && typeof parsed === 'object') {
+        return JSON.stringify(parsed);
+      }
+    } catch (err) {
+      return trimmed;
+    }
+    return trimmed;
+  }
+  if (content && typeof content === 'object') {
+    return JSON.stringify(content);
+  }
+  return String(content ?? '');
+}
+
+function formatFileSize(size) {
+  if (!size || size <= 0) return '';
+  if (size < 1024) return `${size} B`;
+  if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`;
+  if (size < 1024 * 1024 * 1024) return `${(size / (1024 * 1024)).toFixed(1)} MB`;
+  return `${(size / (1024 * 1024 * 1024)).toFixed(1)} GB`;
 }
