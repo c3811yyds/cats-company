@@ -13,8 +13,22 @@ const TABS = {
   CHATS: 'chats'
 };
 
+function getInitialUser() {
+  const token = getToken();
+  if (!token) return null;
+
+  try {
+    const saved = localStorage.getItem('oc_user');
+    return saved ? JSON.parse(saved) : null;
+  } catch (error) {
+    console.warn('Failed to restore saved user from localStorage:', error);
+    localStorage.removeItem('oc_user');
+    return null;
+  }
+}
+
 export default function TinodeWeb() {
-  const [user, setUser] = useState(null);
+  const [user, setUser] = useState(() => getInitialUser());
   const [activeTab, setActiveTab] = useState(TABS.CHATS);
   const [activeTopic, _setActiveTopic] = useState(() => localStorage.getItem('v3_last_topic') || null);
 
@@ -32,14 +46,7 @@ export default function TinodeWeb() {
   const [showProfileEditor, setShowProfileEditor] = useState(false);
   const [showProfilePopover, setShowProfilePopover] = useState(false);
 
-  // Restore session
-  useEffect(() => {
-    const token = getToken();
-    if (token) {
-      const saved = localStorage.getItem('oc_user');
-      if (saved) setUser(JSON.parse(saved));
-    }
-  }, []);
+
 
   const persistUser = useCallback((nextUser) => {
     localStorage.setItem('oc_user', JSON.stringify(nextUser));
