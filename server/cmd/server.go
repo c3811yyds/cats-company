@@ -95,6 +95,7 @@ func main() {
 	botHandler := server.NewBotHandler(db, deployer)
 	msgHandler := server.NewMessageHandler(db, hub)
 	uploadHandler := server.NewUploadHandler("./uploads", "/uploads")
+	readerHandler := server.NewReaderProxyHandlerFromEnv()
 	// usageHandler := server.NewUsageHandler(db)
 
 	// HTTP routes
@@ -195,7 +196,12 @@ func main() {
 
 	// File upload (accepts both JWT and API Key for bot uploads)
 	mux.HandleFunc("/api/upload", authWithDB(uploadHandler.HandleUpload))
+	mux.HandleFunc("/api/reader/analyze", authWithDB(readerHandler.HandleAnalyze))
 	mux.HandleFunc("/uploads/", uploadHandler.HandleServeFile)
+
+	if err := readerHandler.ConfigError(); err != nil {
+		log.Printf("Reader proxy is unavailable until configured: %v", err)
+	}
 
 	// Token usage tracking (API Key auth for bots)
 	// mux.HandleFunc("/api/v1/usage/report", authWithDB(usageHandler.HandleReportUsage))
