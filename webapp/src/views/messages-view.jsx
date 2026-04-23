@@ -8,6 +8,7 @@ import Avatar from '../widgets/avatar';
 
 const PAGE_SIZE = 50;
 const TYPING_TIMEOUT_MS = 10000;
+const WORKING_MESSAGE_TYPES = new Set(['thinking', 'tool_use', 'tool_result']);
 
 export default function MessagesView({ topic, topicName, user, isGroup, groupId, topicAvatarUrl, onTopicUpdated }) {
   const [input, setInput] = useState('');
@@ -495,7 +496,7 @@ export default function MessagesView({ topic, topicName, user, isGroup, groupId,
       const senderUid = msg.from_uid;
       const isConsecutive = (prevSenderUid === senderUid && (msgTime - prevTime < 5 * 60 * 1000));
 
-      if (msg.type === 'thinking' || msg.type === 'tool_use' || msg.type === 'tool_result') {
+      if (isWorkingMessage(msg)) {
         if (!currentWorking) {
           currentWorking = { type: 'working', messages: [], sender: getSender(msg), isConsecutive: isConsecutive };
         }
@@ -744,6 +745,9 @@ function normalizeIncomingMessage(message) {
   normalized.msg_type = message?.msg_type || 'text';
 
   let inferredType = message?.type;
+  if (!inferredType) {
+    inferredType = inferWorkingTypeFromBlocks(normalized.content_blocks);
+  }
   if (!inferredType && message?.content && typeof message.content === 'object' && message.content.type) {
     inferredType = message.content.type;
   }
@@ -763,6 +767,17 @@ function normalizeIncomingMessage(message) {
 
   normalized.type = inferredType;
   return normalized;
+}
+
+function inferWorkingTypeFromBlocks(blocks) {
+  if (!Array.isArray(blocks)) return '';
+  const workingBlock = blocks.find((block) => WORKING_MESSAGE_TYPES.has(block?.type));
+  return workingBlock?.type || '';
+}
+
+function isWorkingMessage(message) {
+  if (WORKING_MESSAGE_TYPES.has(message?.type)) return true;
+  return Boolean(inferWorkingTypeFromBlocks(message?.content_blocks));
 }
 
 // Parse "usr123" -> 123

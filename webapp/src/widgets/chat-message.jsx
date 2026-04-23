@@ -125,6 +125,53 @@ function groupContentBlocks(blocks) {
   return items;
 }
 
+function messageContentText(content, fallback = '') {
+  if (typeof content === 'string') return content;
+  if (content == null) return fallback;
+  try {
+    return JSON.stringify(content);
+  } catch (e) {
+    return fallback;
+  }
+}
+
+function contentBlocksFromMessage(msg) {
+  const storedBlocks = Array.isArray(msg?.content_blocks) ? msg.content_blocks : [];
+  if (storedBlocks.length > 0) {
+    return storedBlocks;
+  }
+
+  if (msg?.type === 'thinking') {
+    return [{ type: 'thinking', thinking: messageContentText(msg.content) }];
+  }
+  if (msg?.type === 'tool_use') {
+    return [{
+      type: 'tool_use',
+      id: msg.metadata?.id || msg.metadata?.tool_call_id || msg.metadata?.tool_use_id,
+      name: messageContentText(msg.content, 'Tool'),
+      input: msg.metadata?.input,
+    }];
+  }
+  if (msg?.type === 'tool_result') {
+    return [{
+      type: 'tool_result',
+      tool_use_id: msg.metadata?.tool_use_id || msg.metadata?.id || msg.metadata?.tool_call_id,
+      content: messageContentText(msg.content),
+      is_error: !!msg.metadata?.is_error,
+    }];
+  }
+
+  return [];
+}
+
+function groupWorkingMessages(messages) {
+  const blocks = [];
+  for (const msg of messages || []) {
+    blocks.push(...contentBlocksFromMessage(msg));
+  }
+  return groupContentBlocks(blocks);
+}
+
 function escapeHtml(text) {
   return String(text)
     .replace(/&/g, '&amp;')
@@ -197,7 +244,7 @@ function ChatMessageComponent({ message, workingMessages = null, isSelf, isGroup
   const storedBlocks = useMemo(() => Array.isArray(message.content_blocks) ? message.content_blocks : [], [message.content_blocks]);
   const workingBlocks = useMemo(() => {
     if (effectiveWorkingMessages.length > 0) {
-      return groupBlocks(effectiveWorkingMessages);
+      return groupWorkingMessages(effectiveWorkingMessages);
     }
     if (storedBlocks.length > 0) {
       return groupContentBlocks(storedBlocks);
