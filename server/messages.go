@@ -68,19 +68,7 @@ func (h *MessageHandler) HandleSendMessage(w http.ResponseWriter, r *http.Reques
 		h.db.CreateTopic(req.TopicID, "p2p", uid)
 	}
 
-	var id int64
-	if len(payload.ContentBlocks) > 0 {
-		mode := payload.Mode
-		if mode == "" {
-			mode = "code"
-		}
-		id, err = h.db.SaveMessageWithBlocks(req.TopicID, uid, payload.StoredContent, payload.ContentBlocks, mode, payload.Role, payload.StoredType)
-	} else if req.ReplyTo > 0 {
-		id, err = h.db.SaveMessageWithReply(req.TopicID, uid, payload.StoredContent, payload.StoredType, int64(req.ReplyTo))
-	} else {
-		id, err = h.db.SaveMessage(req.TopicID, uid, payload.StoredContent, payload.StoredType)
-	}
-
+	id, err := saveNormalizedMessage(h.db, req.TopicID, uid, req.ReplyTo, payload)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to send"})
 		return
@@ -112,10 +100,30 @@ func (h *MessageHandler) HandleSendMessage(w http.ResponseWriter, r *http.Reques
 }
 
 func (h *MessageHandler) fanoutMessage(uid int64, topicID string, replyTo int, payload *normalizedMessagePayload, msgID int64) {
-	if h == nil || h.hub == nil || payload == nil {
+	if h == nil || h.hub == nil {
 		return
 	}
+	h.hub.fanoutNormalizedMessage(uid, topicID, replyTo, payload, msgID, nil)
+}
 
+func saveNormalizedMessage(db *mysql.Adapter, topicID string, uid int64, replyTo int, payload *normalizedMessagePayload) (int64, error) {
+	if len(payload.ContentBlocks) > 0 {
+		mode := payload.Mode
+		if mode == "" {
+			mode = "code"
+		}
+		return db.SaveMessageWithBlocks(topicID, uid, payload.StoredContent, payload.ContentBlocks, mode, payload.Role, payload.StoredType)
+	}
+	if replyTo > 0 {
+		return db.SaveMessageWithReply(topicID, uid, payload.StoredContent, payload.StoredType, int64(replyTo))
+	}
+	return db.SaveMessage(topicID, uid, payload.StoredContent, payload.StoredType)
+}
+
+func (h *Hub) fanoutNormalizedMessage(uid int64, topicID string, replyTo int, payload *normalizedMessagePayload, msgID int64, exclude *Client) {
+	if h == nil || payload == nil {
+		return
+	}
 	dataMsg := &ServerMessage{
 		Data: &MsgServerData{
 			Topic:         topicID,
@@ -139,8 +147,8 @@ func (h *MessageHandler) fanoutMessage(uid int64, topicID string, replyTo int, p
 		}
 		mentions := parseMentions(payload.DisplayContent)
 		dataMsg.Data.Mentions = mentions
-		h.hub.SendToUserExcept(uid, dataMsg, nil)
-		h.hub.broadcastToGroupWithMentions(groupID, dataMsg, uid, mentions, uid)
+		h.SendToUserExcept(uid, dataMsg, exclude)
+		h.broadcastToGroupWithMentions(groupID, dataMsg, uid, mentions, uid)
 		return
 	}
 
@@ -149,14 +157,14 @@ func (h *MessageHandler) fanoutMessage(uid int64, topicID string, replyTo int, p
 		return
 	}
 
-	h.hub.SendToUserExcept(uid, dataMsg, nil)
-	h.hub.SendToUser(peerUID, dataMsg)
+	h.SendToUserExcept(uid, dataMsg, exclude)
+	h.SendToUser(peerUID, dataMsg)
 
-	if senderClient := h.hub.getClient(uid); senderClient != nil && senderClient.accountType == types.AccountBot {
-		h.hub.botStats.RecordSent(uid, topicID)
+	if senderClient := h.getClient(uid); senderClient != nil && senderClient.accountType == types.AccountBot {
+		h.botStats.RecordSent(uid, topicID)
 	}
-	if peerClient := h.hub.getClient(peerUID); peerClient != nil && peerClient.accountType == types.AccountBot {
-		h.hub.botStats.RecordRecv(peerUID)
+	if peerClient := h.getClient(peerUID); peerClient != nil && peerClient.accountType == types.AccountBot {
+		h.botStats.RecordRecv(peerUID)
 	}
 }
 

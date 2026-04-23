@@ -2,7 +2,6 @@
 package server
 
 import (
-	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
@@ -333,34 +332,18 @@ func (h *Hub) handlePub(client *Client, msg *MsgClientPub) {
 	}
 
 	topic := msg.Topic
-
-	// Extract content - support both plain text and rich content
-	var content string
-	var msgType string = "text"
-	switch v := msg.Content.(type) {
-	case string:
-		content = v
-	case map[string]interface{}:
-		// Rich content: { "type": "image", "payload": {...} }
-		if t, ok := v["type"].(string); ok {
-			msgType = t
-		}
-		contentBytes, _ := json.Marshal(v)
-		content = string(contentBytes)
-	default:
-		contentBytes, _ := json.Marshal(msg.Content)
-		content = string(contentBytes)
-	}
-	if content == "" {
+	req := messageRequestFromPub(msg)
+	payload, err := normalizeMessageRequest(req)
+	if err != nil {
 		h.SendToClient(client, &ServerMessage{
-			Ctrl: &MsgServerCtrl{ID: msg.ID, Code: 400, Text: "empty content"},
+			Ctrl: &MsgServerCtrl{ID: msg.ID, Code: 400, Text: err.Error()},
 		})
 		return
 	}
 
 	// Route based on topic type
 	if isGroupTopic(topic) {
-		h.handleGroupPub(client, msg, topic, content, msgType)
+		h.handleGroupPub(client, msg, topic, payload)
 		return
 	}
 
@@ -378,14 +361,7 @@ func (h *Hub) handlePub(client *Client, msg *MsgClientPub) {
 	// Ensure topic exists
 	h.db.CreateTopic(topic, "p2p", uid)
 
-	// Save to database (with optional reply_to)
-	var msgID int64
-	var err error
-	if msg.ReplyTo > 0 {
-		msgID, err = h.db.SaveMessageWithReply(topic, uid, content, msgType, int64(msg.ReplyTo))
-	} else {
-		msgID, err = h.db.SaveMessage(topic, uid, content, msgType)
-	}
+	msgID, err := saveNormalizedMessage(h.db, topic, uid, msg.ReplyTo, payload)
 	if err != nil {
 		log.Printf("save message error: %v", err)
 		h.SendToClient(client, &ServerMessage{
@@ -407,36 +383,11 @@ func (h *Hub) handlePub(client *Client, msg *MsgClientPub) {
 		},
 	})
 
-	// Track bot stats
-	if client.accountType == types.AccountBot {
-		h.botStats.RecordSent(uid, topic)
-	}
-	if peerClient := h.getClient(peerUID); peerClient != nil && peerClient.accountType == types.AccountBot {
-		h.botStats.RecordRecv(peerUID)
-	}
-
-	// Build the data message to deliver
-	dataMsg := &ServerMessage{
-		Data: &MsgServerData{
-			Topic:   topic,
-			From:    formatUID(uid),
-			SeqID:   int(msgID),
-			Content: msg.Content, // preserve original structure
-			Type:    msgType,
-			MsgType: msgType,
-			ReplyTo: msg.ReplyTo,
-		},
-	}
-
-	// Sync the sender's other devices, then deliver to the peer.
-	h.SendToUserExcept(uid, dataMsg, client)
-	if peerUID > 0 {
-		h.SendToUser(peerUID, dataMsg)
-	}
+	h.fanoutNormalizedMessage(uid, topic, msg.ReplyTo, payload, msgID, client)
 }
 
 // handleGroupPub handles publishing a message to a group topic.
-func (h *Hub) handleGroupPub(client *Client, msg *MsgClientPub, topic, content, msgType string) {
+func (h *Hub) handleGroupPub(client *Client, msg *MsgClientPub, topic string, payload *normalizedMessagePayload) {
 	uid := client.uid
 	groupID := extractGroupID(topic)
 	if groupID == 0 {
@@ -464,13 +415,7 @@ func (h *Hub) handleGroupPub(client *Client, msg *MsgClientPub, topic, content, 
 		return
 	}
 
-	// Save to database (with optional reply_to)
-	var msgID int64
-	if msg.ReplyTo > 0 {
-		msgID, err = h.db.SaveMessageWithReply(topic, uid, content, msgType, int64(msg.ReplyTo))
-	} else {
-		msgID, err = h.db.SaveMessage(topic, uid, content, msgType)
-	}
+	msgID, err := saveNormalizedMessage(h.db, topic, uid, msg.ReplyTo, payload)
 	if err != nil {
 		log.Printf("save group message error: %v", err)
 		h.SendToClient(client, &ServerMessage{
@@ -492,25 +437,24 @@ func (h *Hub) handleGroupPub(client *Client, msg *MsgClientPub, topic, content, 
 		},
 	})
 
-	// Build the data message
-	// Parse @mentions from content
-	mentions := parseMentions(content)
-	dataMsg := &ServerMessage{
-		Data: &MsgServerData{
-			Topic:    topic,
-			From:     formatUID(uid),
-			SeqID:    int(msgID),
-			Content:  msg.Content,
-			Type:     msgType,
-			MsgType:  msgType,
-			ReplyTo:  msg.ReplyTo,
-			Mentions: mentions,
-		},
-	}
+	h.fanoutNormalizedMessage(uid, topic, msg.ReplyTo, payload, msgID, client)
+}
 
-	// Sync the sender's other devices, then broadcast to other members.
-	h.SendToUserExcept(uid, dataMsg, client)
-	h.broadcastToGroupWithMentions(groupID, dataMsg, uid, mentions, uid)
+func messageRequestFromPub(msg *MsgClientPub) *SendMessageRequest {
+	if msg == nil {
+		return nil
+	}
+	return &SendMessageRequest{
+		TopicID:       msg.Topic,
+		Content:       msg.Content,
+		ContentBlocks: msg.ContentBlocks,
+		Metadata:      msg.Metadata,
+		MsgType:       msg.MsgType,
+		Type:          msg.Type,
+		Mode:          msg.Mode,
+		Role:          msg.Role,
+		ReplyTo:       msg.ReplyTo,
+	}
 }
 
 // broadcastToGroup sends a message to all online members of a group.

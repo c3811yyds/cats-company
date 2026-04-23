@@ -1,20 +1,24 @@
 // Package server defines the wire protocol data model for Cats Company.
 package server
 
-import "github.com/openchat/openchat/server/store/types"
+import (
+	"encoding/json"
+
+	"github.com/openchat/openchat/server/store/types"
+)
 
 // ClientMessage is the top-level client-to-server message envelope.
 type ClientMessage struct {
-	Hi      *MsgClientHi      `json:"hi,omitempty"`
-	Acc     *MsgClientAcc     `json:"acc,omitempty"`
-	Login   *MsgClientLogin   `json:"login,omitempty"`
-	Sub     *MsgClientSub     `json:"sub,omitempty"`
-	Pub     *MsgClientPub     `json:"pub,omitempty"`
-	Get     *MsgClientGet     `json:"get,omitempty"`
-	Set     *MsgClientSet     `json:"set,omitempty"`
-	Del     *MsgClientDel     `json:"del,omitempty"`
-	Note    *MsgClientNote    `json:"note,omitempty"`
-	Friend  *MsgClientFriend  `json:"friend,omitempty"`
+	Hi     *MsgClientHi     `json:"hi,omitempty"`
+	Acc    *MsgClientAcc    `json:"acc,omitempty"`
+	Login  *MsgClientLogin  `json:"login,omitempty"`
+	Sub    *MsgClientSub    `json:"sub,omitempty"`
+	Pub    *MsgClientPub    `json:"pub,omitempty"`
+	Get    *MsgClientGet    `json:"get,omitempty"`
+	Set    *MsgClientSet    `json:"set,omitempty"`
+	Del    *MsgClientDel    `json:"del,omitempty"`
+	Note   *MsgClientNote   `json:"note,omitempty"`
+	Friend *MsgClientFriend `json:"friend,omitempty"`
 }
 
 // ServerMessage is the top-level server-to-client message envelope.
@@ -56,10 +60,16 @@ type MsgClientSub struct {
 }
 
 type MsgClientPub struct {
-	ID      string      `json:"id,omitempty"`
-	Topic   string      `json:"topic"`
-	Content interface{} `json:"content"`
-	ReplyTo int         `json:"reply_to,omitempty"`
+	ID            string                 `json:"id,omitempty"`
+	Topic         string                 `json:"topic"`
+	Content       json.RawMessage        `json:"content,omitempty"`
+	ContentBlocks []types.ContentBlock   `json:"content_blocks,omitempty"`
+	Metadata      map[string]interface{} `json:"metadata,omitempty"`
+	MsgType       string                 `json:"msg_type,omitempty"`
+	Type          string                 `json:"type,omitempty"`
+	Mode          string                 `json:"mode,omitempty"`
+	Role          string                 `json:"role,omitempty"`
+	ReplyTo       int                    `json:"reply_to,omitempty"`
 }
 
 type MsgClientGet struct {
