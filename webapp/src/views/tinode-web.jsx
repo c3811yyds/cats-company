@@ -111,8 +111,15 @@ export default function TinodeWeb() {
     });
   };
 
-  const handleRegister = async (email, password, displayName, code, inviteCode) => {
-    await api.register({ email, password, display_name: displayName, code, inviteCode });
+  const handleRegister = async (email, password, displayName, code) => {
+    const loginName = displayName.trim();
+    await api.register({
+      email,
+      username: loginName,
+      password,
+      display_name: loginName,
+      code,
+    });
     await handleLogin(email, password);
   };
 
@@ -241,7 +248,6 @@ function AuthView({ mode, setMode, onLogin, onRegister }) {
   const [password, setPassword] = useState('');
   const [displayName, setDisplayName] = useState('');
   const [code, setCode] = useState('');
-  const [inviteCode, setInviteCode] = useState('');
   const [error, setError] = useState('');
   const [codeSent, setCodeSent] = useState(false);
   const [countdown, setCountdown] = useState(0);
@@ -264,7 +270,7 @@ function AuthView({ mode, setMode, onLogin, onRegister }) {
       setCountdown(60);
       setError('');
     } catch (err) {
-      setError('发送验证码失败');
+      setError(err.message || '发送验证码失败，请稍后再试');
     }
   };
 
@@ -275,7 +281,7 @@ function AuthView({ mode, setMode, onLogin, onRegister }) {
       if (mode === 'login') {
         await onLogin(username, password);
       } else {
-        await onRegister(email, password, displayName, code, inviteCode);
+        await onRegister(email, password, displayName, code);
       }
     } catch (err) {
       setError(err.message);
@@ -336,13 +342,7 @@ function AuthView({ mode, setMode, onLogin, onRegister }) {
             </div>
             <input
               className="oc-auth-input"
-              placeholder="邀请码"
-              value={inviteCode}
-              onChange={(e) => setInviteCode(e.target.value)}
-            />
-            <input
-              className="oc-auth-input"
-              placeholder="显示名称"
+              placeholder="登录名称（可用于登录）"
               value={displayName}
               onChange={(e) => setDisplayName(e.target.value)}
             />
