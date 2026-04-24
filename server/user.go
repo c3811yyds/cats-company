@@ -31,7 +31,6 @@ type RegisterRequest struct {
 	Email       string `json:"email,omitempty"`
 	Phone       string `json:"phone,omitempty"`
 	Code        string `json:"code,omitempty"`
-	InviteCode  string `json:"inviteCode,omitempty"`
 }
 
 // SendCodeRequest is the JSON body for sending verification code.
@@ -105,15 +104,6 @@ func (h *UserHandler) HandleRegister(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		if req.InviteCode != "" {
-			valid, err := validateInvitationCode(h.db, req.InviteCode)
-			if err != nil || !valid {
-				fmt.Printf("[REGISTER_ERROR] Invalid invite code: %s, err: %v\n", req.InviteCode, err)
-				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid invitation code"})
-				return
-			}
-		}
-
 		if len(req.Password) < 6 {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "password min 6 chars"})
 			return
@@ -151,14 +141,10 @@ func (h *UserHandler) HandleRegister(w http.ResponseWriter, r *http.Request) {
 			PassHash:    hash,
 		}
 
-		uid, err := h.db.CreateUser(user)
+		_, err := h.db.CreateUser(user)
 		if err != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "email already exists"})
 			return
-		}
-
-		if req.InviteCode != "" {
-			markInvitationUsed(h.db, req.InviteCode, uid)
 		}
 
 		writeJSON(w, http.StatusOK, map[string]interface{}{"success": true})
