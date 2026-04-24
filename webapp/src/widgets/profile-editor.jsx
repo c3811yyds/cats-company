@@ -5,7 +5,7 @@ import Avatar from './avatar';
 
 export default function ProfileEditor({ user, onClose, onSaved }) {
   const fileInputRef = useRef(null);
-  const [displayName, setDisplayName] = useState(user?.display_name || user?.username || '');
+  const [displayName, setDisplayName] = useState(user?.display_name || '');
   const [avatarUrl, setAvatarUrl] = useState(user?.avatar_url || '');
   const [showThinking, setShowThinking] = useState(() => {
     const saved = localStorage.getItem('cc_show_thinking');
@@ -30,10 +30,6 @@ export default function ProfileEditor({ user, onClose, onSaved }) {
   };
 
   const handleSave = async () => {
-    if (!displayName.trim()) {
-      setError(t('display_name'));
-      return;
-    }
     setSaving(true);
     setError('');
     try {
@@ -67,10 +63,13 @@ export default function ProfileEditor({ user, onClose, onSaved }) {
         </div>
         <input
           className="oc-auth-input"
-          placeholder={t('display_name')}
+          placeholder="显示昵称（可选）"
           value={displayName}
           onChange={(e) => setDisplayName(e.target.value)}
         />
+        <div className="oc-settings-secondary" style={{ marginTop: -10, marginBottom: 12 }}>
+          登录名称：{user?.username || '-'}。这里只会改变聊天中展示的昵称，不会改变登录名称或邮箱登录。
+        </div>
         <div style={{ padding: '16px 0', marginTop: '16px', borderTop: '1px solid var(--v3-border)', borderBottom: '1px solid var(--v3-border)' }}>
           <label style={{ display: 'flex', alignItems: 'center', cursor: 'pointer' }}>
             <input

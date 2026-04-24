@@ -322,10 +322,7 @@ func (h *UserHandler) HandleUpdateMe(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if req.DisplayName == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "display name required"})
-		return
-	}
+	req.DisplayName = strings.TrimSpace(req.DisplayName)
 
 	if err := h.db.UpdateUser(uid, req.DisplayName, req.AvatarURL); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to update profile"})
