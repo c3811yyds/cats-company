@@ -111,13 +111,18 @@ export default function TinodeWeb() {
     });
   };
 
-  const handleRegister = async (email, password, displayName, code) => {
-    const loginName = displayName.trim();
+  const handleRegister = async (email, password, loginName, code) => {
+    const username = loginName.trim();
+    if (!username) {
+      throw new Error('请输入登录名称');
+    }
+    if (username.length < 3) {
+      throw new Error('登录名称至少 3 个字符');
+    }
     await api.register({
       email,
-      username: loginName,
+      username,
       password,
-      display_name: loginName,
       code,
     });
     await handleLogin(email, password);
@@ -242,11 +247,22 @@ function ProfileFooter({ user, wsStatus, onTogglePopover }) {
   );
 }
 
+function formatAuthError(message) {
+  const text = String(message || '').toLowerCase();
+  if (text.includes('username taken')) return '登录名称已被占用，请换一个';
+  if (text.includes('email already')) return '该邮箱已经注册，请直接登录';
+  if (text.includes('invalid or expired verification code')) return '验证码无效或已过期';
+  if (text.includes('username min 3')) return '登录名称至少 3 个字符';
+  if (text.includes('password min 6')) return '密码至少 6 位';
+  if (text.includes('failed to send verification code')) return '发送验证码失败，请稍后再试';
+  return message || '操作失败，请稍后再试';
+}
+
 function AuthView({ mode, setMode, onLogin, onRegister }) {
   const [username, setUsername] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [displayName, setDisplayName] = useState('');
+  const [loginName, setLoginName] = useState('');
   const [code, setCode] = useState('');
   const [error, setError] = useState('');
   const [codeSent, setCodeSent] = useState(false);
@@ -281,10 +297,10 @@ function AuthView({ mode, setMode, onLogin, onRegister }) {
       if (mode === 'login') {
         await onLogin(username, password);
       } else {
-        await onRegister(email, password, displayName, code);
+        await onRegister(email, password, loginName, code);
       }
     } catch (err) {
-      setError(err.message);
+      setError(formatAuthError(err.message));
     }
   };
 
@@ -343,8 +359,8 @@ function AuthView({ mode, setMode, onLogin, onRegister }) {
             <input
               className="oc-auth-input"
               placeholder="登录名称（可用于登录）"
-              value={displayName}
-              onChange={(e) => setDisplayName(e.target.value)}
+              value={loginName}
+              onChange={(e) => setLoginName(e.target.value)}
             />
             <input
               className="oc-auth-input"
