@@ -41,7 +41,7 @@ type SendCodeRequest struct {
 
 // LoginRequest is the JSON body for login.
 type LoginRequest struct {
-	Account  string `json:"account"`  // 支持用户名或邮箱
+	Account  string `json:"account"` // 支持用户名或邮箱
 	Password string `json:"password"`
 }
 
@@ -77,14 +77,16 @@ func (h *UserHandler) HandleSendCode(w http.ResponseWriter, r *http.Request) {
 
 	code, err := sendVerificationCode(req.Email)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to send code"})
+		fmt.Printf("[EMAIL_ERROR] Failed to send verification code to %s: %v\n", req.Email, err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to send verification code"})
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"success": true,
-		"devCode": code,
-	})
+	resp := map[string]interface{}{"success": true}
+	if exposeVerificationCodeInResponse() {
+		resp["devCode"] = code
+	}
+	writeJSON(w, http.StatusOK, resp)
 }
 
 // HandleRegister handles POST /api/auth/register

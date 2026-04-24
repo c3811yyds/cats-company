@@ -320,6 +320,11 @@ func (h *Hub) handleHi(client *Client, displayName string, msg *MsgClientHi) {
 // handlePub handles a publish (send message) request.
 func (h *Hub) handlePub(client *Client, msg *MsgClientPub) {
 	uid := client.uid
+	topic := msg.Topic
+	if isStreamPub(msg) {
+		h.handleStreamPub(client, msg, topic)
+		return
+	}
 
 	// Rate limit check
 	if h.rateLimiter != nil {
@@ -331,7 +336,6 @@ func (h *Hub) handlePub(client *Client, msg *MsgClientPub) {
 		}
 	}
 
-	topic := msg.Topic
 	req := messageRequestFromPub(msg)
 	payload, err := normalizeMessageRequest(req)
 	if err != nil {
@@ -384,6 +388,139 @@ func (h *Hub) handlePub(client *Client, msg *MsgClientPub) {
 	})
 
 	h.fanoutNormalizedMessage(uid, topic, msg.ReplyTo, payload, msgID, client)
+}
+
+func isStreamPub(msg *MsgClientPub) bool {
+	if msg == nil {
+		return false
+	}
+	msgType := strings.TrimSpace(firstNonEmpty(msg.Type, msg.MsgType))
+	return msgType == "stream_delta" || msgType == "stream_cancel"
+}
+
+func (h *Hub) handleStreamPub(client *Client, msg *MsgClientPub, topic string) {
+	uid := client.uid
+	streamID := firstMetadataString(msg.Metadata, "stream_id")
+	streamType := strings.TrimSpace(firstNonEmpty(msg.Type, msg.MsgType))
+	if strings.TrimSpace(topic) == "" {
+		h.SendToClient(client, &ServerMessage{
+			Ctrl: &MsgServerCtrl{ID: msg.ID, Code: 400, Text: "topic required"},
+		})
+		return
+	}
+	if streamID == "" {
+		h.SendToClient(client, &ServerMessage{
+			Ctrl: &MsgServerCtrl{ID: msg.ID, Code: 400, Text: "stream_id required"},
+		})
+		return
+	}
+
+	_, displayContent := normalizeRawContent(msg.Content)
+	delta := normalizeContentText(displayContent)
+
+	if isGroupTopic(topic) {
+		groupID := extractGroupID(topic)
+		if groupID == 0 {
+			h.SendToClient(client, &ServerMessage{
+				Ctrl: &MsgServerCtrl{ID: msg.ID, Code: 400, Text: "invalid group topic"},
+			})
+			return
+		}
+
+		isMember, err := h.db.IsGroupMember(groupID, uid)
+		if err != nil || !isMember {
+			h.SendToClient(client, &ServerMessage{
+				Ctrl: &MsgServerCtrl{ID: msg.ID, Code: 403, Text: "not a group member"},
+			})
+			return
+		}
+
+		isMuted, _ := h.db.IsMemberMuted(groupID, uid)
+		if isMuted {
+			h.SendToClient(client, &ServerMessage{
+				Ctrl: &MsgServerCtrl{ID: msg.ID, Code: 403, Text: "you are muted in this group"},
+			})
+			return
+		}
+
+		h.SendToClient(client, streamDeltaAck(msg.ID, topic, streamID))
+		if delta != "" || streamType == "stream_cancel" {
+			h.fanoutStreamEvent(uid, topic, streamType, delta, msg.Metadata, client)
+		}
+		return
+	}
+
+	peerUID := extractPeerUID(topic, uid)
+	if peerUID == 0 {
+		h.SendToClient(client, &ServerMessage{
+			Ctrl: &MsgServerCtrl{ID: msg.ID, Code: 400, Text: "invalid p2p topic"},
+		})
+		return
+	}
+
+	h.db.CreateTopic(topic, "p2p", uid)
+	h.SendToClient(client, streamDeltaAck(msg.ID, topic, streamID))
+	if delta != "" || streamType == "stream_cancel" {
+		h.fanoutStreamEvent(uid, topic, streamType, delta, msg.Metadata, client)
+	}
+}
+
+func streamDeltaAck(id, topic, streamID string) *ServerMessage {
+	return &ServerMessage{
+		Ctrl: &MsgServerCtrl{
+			ID:    id,
+			Topic: topic,
+			Code:  200,
+			Text:  "ok",
+			Params: map[string]interface{}{
+				"stream_id": streamID,
+			},
+		},
+	}
+}
+
+func (h *Hub) fanoutStreamEvent(uid int64, topicID string, streamType string, content string, metadata map[string]interface{}, exclude *Client) {
+	if h == nil {
+		return
+	}
+	if streamType == "" {
+		streamType = "stream_delta"
+	}
+	streamMetadata := map[string]interface{}{}
+	for key, value := range metadata {
+		streamMetadata[key] = value
+	}
+	streamMetadata["stream_event"] = strings.TrimPrefix(streamType, "stream_")
+
+	dataMsg := &ServerMessage{
+		Data: &MsgServerData{
+			Topic:    topicID,
+			From:     formatUID(uid),
+			SeqID:    0,
+			Content:  content,
+			Type:     streamType,
+			MsgType:  "text",
+			Metadata: streamMetadata,
+			Mode:     "stream",
+			Role:     "assistant",
+		},
+	}
+
+	if isGroupTopic(topicID) {
+		groupID := extractGroupID(topicID)
+		if groupID == 0 {
+			return
+		}
+		h.broadcastToGroup(groupID, dataMsg, uid)
+		return
+	}
+
+	peerUID := extractPeerUID(topicID, uid)
+	if peerUID == 0 {
+		return
+	}
+	h.SendToUserExcept(uid, dataMsg, exclude)
+	h.SendToUser(peerUID, dataMsg)
 }
 
 // handleGroupPub handles publishing a message to a group topic.

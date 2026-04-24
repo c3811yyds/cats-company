@@ -90,6 +90,30 @@ export default function MessagesView({ topic, topicName, user, isGroup, groupId,
     const unsub = onWSMessage((msg) => {
       // New message from server
       if (msg.data && msg.data.topic === topic) {
+        if (isStreamCancel(msg.data)) {
+          const streamId = getStreamId(msg.data);
+          if (streamId) {
+            setMessages((prev) => prev.filter((message) => message._stream_id !== streamId));
+          }
+          return;
+        }
+
+        if (isStreamDelta(msg.data)) {
+          const fromUid = parseUid(msg.data.from);
+          const streamId = getStreamId(msg.data);
+          const delta = streamDeltaText(msg.data.content);
+          if (streamId && delta) {
+            setMessages((prev) => upsertStreamingMessage(prev, {
+              streamId,
+              topic,
+              fromUid,
+              content: delta,
+              metadata: msg.data.metadata || null,
+            }));
+          }
+          return;
+        }
+
         const fromUid = parseUid(msg.data.from);
         const serverMsg = normalizeIncomingMessage({
           id: msg.data.seq_id || msg.data.seq,
@@ -109,10 +133,17 @@ export default function MessagesView({ topic, topicName, user, isGroup, groupId,
         });
 
         setMessages((prev) => {
-          // Deduplicate by seq ID
-          if (prev.some((m) => m.id === serverMsg.id)) {
-            return prev;
+          const streamId = getStreamId(serverMsg);
+          if (streamId) {
+            const streamIdx = prev.findIndex((m) => m._stream_id === streamId);
+            if (streamIdx !== -1) {
+              const next = [...prev];
+              next[streamIdx] = serverMsg;
+              return mergeMessages([], next);
+            }
           }
+          // Deduplicate by seq ID
+          if (prev.some((m) => m.id === serverMsg.id)) return prev;
           // If this is our own message echoed back, replace the optimistic entry
           if (fromUid === user.uid) {
             const serverContentKey = getComparableContent(serverMsg.content);
@@ -767,6 +798,67 @@ function normalizeIncomingMessage(message) {
 
   normalized.type = inferredType;
   return normalized;
+}
+
+function isStreamDelta(data) {
+  return data?.type === 'stream_delta' || data?.metadata?.stream_event === 'delta';
+}
+
+function isStreamCancel(data) {
+  return data?.type === 'stream_cancel' || data?.metadata?.stream_event === 'cancel';
+}
+
+function getStreamId(message) {
+  const id = message?.metadata?.stream_id || message?._stream_id;
+  return typeof id === 'string' && id.trim() ? id.trim() : '';
+}
+
+function streamDeltaText(content) {
+  if (typeof content === 'string') return content;
+  if (content == null) return '';
+  if (typeof content === 'object' && typeof content.text === 'string') return content.text;
+  return String(content);
+}
+
+function upsertStreamingMessage(messages, { streamId, topic, fromUid, content, metadata }) {
+  const existingIdx = messages.findIndex((message) => message._stream_id === streamId);
+  if (existingIdx !== -1) {
+    const next = [...messages];
+    const existing = next[existingIdx];
+    next[existingIdx] = {
+      ...existing,
+      content: `${streamDeltaText(existing.content)}${content}`,
+      metadata: {
+        ...(existing.metadata || {}),
+        ...(metadata || {}),
+        stream_id: streamId,
+      },
+      _streaming: true,
+      _stream_id: streamId,
+    };
+    return next;
+  }
+
+  const now = Date.now();
+  return [
+    ...messages,
+    normalizeIncomingMessage({
+      id: `stream:${streamId}`,
+      seq_id: now,
+      topic_id: topic,
+      from_uid: fromUid,
+      content,
+      type: 'text',
+      msg_type: 'text',
+      metadata: {
+        ...(metadata || {}),
+        stream_id: streamId,
+      },
+      created_at: new Date(now).toISOString(),
+      _streaming: true,
+      _stream_id: streamId,
+    }),
+  ];
 }
 
 function inferWorkingTypeFromBlocks(blocks) {

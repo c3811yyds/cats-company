@@ -339,6 +339,7 @@ function ChatMessageComponent({ message, workingMessages = null, isSelf, isGroup
         {hasText && (
           <div style={{lineHeight: 1.46}}>
             {parsed ? <RichContent content={parsed} /> : <TextContent content={renderedTextContent} isGroup={isGroup} />}
+            {message._streaming && <span className="oc-streaming-cursor" aria-hidden="true">|</span>}
           </div>
         )}
       </div>

@@ -2332,6 +2332,20 @@ body {
   color: #666;
 }
 
+.oc-streaming-cursor {
+  display: inline-block;
+  margin-left: 3px;
+  color: var(--v3-primary);
+  font-weight: 700;
+  animation: oc-streaming-cursor-blink 1s steps(2, start) infinite;
+}
+
+@keyframes oc-streaming-cursor-blink {
+  50% {
+    opacity: 0;
+  }
+}
+
 /* Code Mode Styles - New Design */
 .oc-code-mode-container {
   display: flex;
