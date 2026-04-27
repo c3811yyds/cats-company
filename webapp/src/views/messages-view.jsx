@@ -9,12 +9,16 @@ import Avatar from '../widgets/avatar';
 const PAGE_SIZE = 50;
 const TYPING_TIMEOUT_MS = 10000;
 const WORKING_MESSAGE_TYPES = new Set(['thinking', 'tool_use', 'tool_result']);
+const MAX_ATTACHMENT_SIZE = 100 * 1024 * 1024; // 100MB
+const MAX_DROPPED_FILES = 200;
+const IMAGE_EXTENSIONS = new Set(['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.svg', '.heic', '.heif']);
 
 export default function MessagesView({ topic, topicName, user, isGroup, groupId, topicAvatarUrl, onTopicUpdated }) {
   const [input, setInput] = useState('');
   const [messages, setMessages] = useState([]);
   const [pendingAttachment, setPendingAttachment] = useState(null);
   const [isUploadingAttachment, setIsUploadingAttachment] = useState(false);
+  const [isDragActive, setIsDragActive] = useState(false);
   const [peerTyping, setPeerTyping] = useState(false);
   const [members, setMembers] = useState([]);
   const [groupInfo, setGroupInfo] = useState(null);
@@ -38,6 +42,7 @@ export default function MessagesView({ topic, topicName, user, isGroup, groupId,
   const fileInputRef = useRef(null);
   const imageInputRef = useRef(null);
   const textareaRef = useRef(null);
+  const dragDepthRef = useRef(0);
 
   // Load message history and group members when topic changes
   useEffect(() => {
@@ -45,6 +50,8 @@ export default function MessagesView({ topic, topicName, user, isGroup, groupId,
     setMessages([]);
     setPendingAttachment(null);
     setIsUploadingAttachment(false);
+    setIsDragActive(false);
+    dragDepthRef.current = 0;
     setPeerTyping(false);
     setReplyTo(null);
     setMembers([]);
@@ -59,6 +66,29 @@ export default function MessagesView({ topic, topicName, user, isGroup, groupId,
       loadPeerProfile();
     }
   }, [topic]);
+
+  useEffect(() => {
+    const preventBrowserFileOpen = (event) => {
+      if (hasFileDrag(event.dataTransfer)) {
+        event.preventDefault();
+      }
+    };
+    const resetDragState = () => {
+      dragDepthRef.current = 0;
+      setIsDragActive(false);
+    };
+
+    window.addEventListener('dragover', preventBrowserFileOpen);
+    window.addEventListener('drop', preventBrowserFileOpen);
+    window.addEventListener('dragend', resetDragState);
+    window.addEventListener('blur', resetDragState);
+    return () => {
+      window.removeEventListener('dragover', preventBrowserFileOpen);
+      window.removeEventListener('drop', preventBrowserFileOpen);
+      window.removeEventListener('dragend', resetDragState);
+      window.removeEventListener('blur', resetDragState);
+    };
+  }, []);
 
   const loadGroupMembers = async () => {
     try {
@@ -391,15 +421,11 @@ export default function MessagesView({ topic, topicName, user, isGroup, groupId,
     }, 0);
   };
 
-  const handleFileUpload = async (e, type) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    e.target.value = ''; // reset input
-
-    const MAX_SIZE = 100 * 1024 * 1024; // 100MB
-    if (file.size > MAX_SIZE) {
+  const uploadAttachmentFile = async (file, requestedType) => {
+    const type = inferAttachmentType(file, requestedType);
+    if (file.size > MAX_ATTACHMENT_SIZE) {
       window.alert(`Upload failed: File is too large (${(file.size / 1024 / 1024).toFixed(1)}MB). Maximum supported size is 100MB.`);
-      return;
+      return false;
     }
 
     try {
@@ -445,6 +471,7 @@ export default function MessagesView({ topic, topicName, user, isGroup, groupId,
         content,
       });
       setTimeout(() => textareaRef.current?.focus(), 0);
+      return true;
     } catch (err) {
       // Fallback: If the server returns a raw Nginx HTML 413 instead of JSON, 
       // res.json() will throw a generic SyntaxError. We explicitly alert the user.
@@ -452,9 +479,70 @@ export default function MessagesView({ topic, topicName, user, isGroup, groupId,
         ? 'Upload failed: Server rejected the file (likely Payload Too Large / 413).'
         : `Upload failed: ${err.message}`;
       window.alert(errorMsg);
+      return false;
     } finally {
       setIsUploadingAttachment(false);
     }
+  };
+
+  const handleFileUpload = async (e, type) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    e.target.value = ''; // reset input
+    await uploadAttachmentFile(file, type);
+  };
+
+  const handleDragEnter = (e) => {
+    if (!hasFileDrag(e.dataTransfer)) return;
+    e.preventDefault();
+    e.stopPropagation();
+    dragDepthRef.current += 1;
+    setIsDragActive(true);
+  };
+
+  const handleDragOver = (e) => {
+    if (!hasFileDrag(e.dataTransfer)) return;
+    e.preventDefault();
+    e.stopPropagation();
+    e.dataTransfer.dropEffect = 'copy';
+    setIsDragActive(true);
+  };
+
+  const handleDragLeave = (e) => {
+    if (!hasFileDrag(e.dataTransfer)) return;
+    e.preventDefault();
+    e.stopPropagation();
+    dragDepthRef.current = Math.max(0, dragDepthRef.current - 1);
+    if (dragDepthRef.current === 0) {
+      setIsDragActive(false);
+    }
+  };
+
+  const handleDrop = async (e) => {
+    if (!hasFileDrag(e.dataTransfer)) return;
+    e.preventDefault();
+    e.stopPropagation();
+    dragDepthRef.current = 0;
+    setIsDragActive(false);
+
+    if (isUploadingAttachment) {
+      window.alert('Upload in progress. Please wait before dropping another file.');
+      return;
+    }
+    if (pendingAttachment && !window.confirm('Replace the current pending attachment with the dropped file?')) {
+      return;
+    }
+
+    const files = await collectDroppedFiles(e.dataTransfer);
+    if (files.length === 0) {
+      window.alert('No uploadable files were found in this drop.');
+      return;
+    }
+    if (files.length > 1) {
+      window.alert(`Dropped ${files.length} files. The current composer supports one attachment at a time, so only "${files[0].name}" will be prepared.`);
+    }
+
+    await uploadAttachmentFile(files[0]);
   };
 
   // Find the display name for a uid in group context
@@ -603,7 +691,15 @@ export default function MessagesView({ topic, topicName, user, isGroup, groupId,
           )}
         </div>
       </div>
-      <div className="v3-timeline" ref={timelineRef} onScroll={handleTimelineScroll}>
+      <div
+        className={`v3-timeline${isDragActive ? ' is-drag-active' : ''}`}
+        ref={timelineRef}
+        onScroll={handleTimelineScroll}
+        onDragEnter={handleDragEnter}
+        onDragOver={handleDragOver}
+        onDragLeave={handleDragLeave}
+        onDrop={handleDrop}
+      >
         <div style={{ maxWidth: 900, margin: '0 auto', width: '100%', display: 'flex', flexDirection: 'column' }}>
           <div className="v3-date-divider">
             <span>Chat History</span>
@@ -674,7 +770,13 @@ export default function MessagesView({ topic, topicName, user, isGroup, groupId,
         </div>
       )}
 
-      <div className="v3-composer">
+      <div
+        className={`v3-composer${isDragActive ? ' is-drag-active' : ''}`}
+        onDragEnter={handleDragEnter}
+        onDragOver={handleDragOver}
+        onDragLeave={handleDragLeave}
+        onDrop={handleDrop}
+      >
         {/* @mention picker */}
         {showMentionPicker && isGroup && filteredMembers.length > 0 && (
           <div className="oc-mention-picker" style={{position:'absolute', bottom: '100%', left: 20, zIndex: 100}}>
@@ -693,6 +795,12 @@ export default function MessagesView({ topic, topicName, user, isGroup, groupId,
         )}
 
         <div className="v3-composer-box">
+          {isDragActive && (
+            <div className="v3-drop-overlay" aria-hidden="true">
+              <div className="v3-drop-title">Drop files to upload</div>
+              <div className="v3-drop-subtitle">Images, files, and folders are supported. The attachment will wait here before sending.</div>
+            </div>
+          )}
           
           <div className="v3-composer-toolbar">
             <button className="v3-tool" onClick={() => imageInputRef.current?.click()} title="Upload Image" type="button">
@@ -767,6 +875,94 @@ export default function MessagesView({ topic, topicName, user, isGroup, groupId,
       )}
     </>
   );
+}
+
+function hasFileDrag(dataTransfer) {
+  if (!dataTransfer?.types) return false;
+  return Array.from(dataTransfer.types).includes('Files');
+}
+
+function inferAttachmentType(file, requestedType) {
+  if (requestedType) return requestedType;
+  if (file?.type?.toLowerCase().startsWith('image/')) return 'image';
+  const name = file?.name?.toLowerCase() || '';
+  const extension = name.includes('.') ? name.slice(name.lastIndexOf('.')) : '';
+  return IMAGE_EXTENSIONS.has(extension) ? 'image' : 'file';
+}
+
+async function collectDroppedFiles(dataTransfer) {
+  const files = [];
+  const addFile = (file) => {
+    if (file && files.length < MAX_DROPPED_FILES) {
+      files.push(file);
+    }
+  };
+
+  const items = Array.from(dataTransfer?.items || []);
+  if (items.length > 0) {
+    for (const item of items) {
+      if (files.length >= MAX_DROPPED_FILES) break;
+      if (item.kind !== 'file') continue;
+
+      const entry = typeof item.webkitGetAsEntry === 'function' ? item.webkitGetAsEntry() : null;
+      if (entry) {
+        const entryFiles = await readEntryFiles(entry, MAX_DROPPED_FILES - files.length);
+        entryFiles.forEach(addFile);
+      } else if (typeof item.getAsFile === 'function') {
+        addFile(item.getAsFile());
+      }
+    }
+  }
+
+  if (files.length === 0) {
+    Array.from(dataTransfer?.files || []).forEach(addFile);
+  }
+
+  return files;
+}
+
+async function readEntryFiles(entry, limit) {
+  if (!entry || limit <= 0) return [];
+  if (entry.isFile) {
+    return new Promise((resolve) => {
+      entry.file(
+        (file) => resolve(file ? [file] : []),
+        () => resolve([]),
+      );
+    });
+  }
+
+  if (!entry.isDirectory) return [];
+
+  const reader = entry.createReader();
+  const entries = await readDirectoryEntries(reader);
+  const files = [];
+  for (const child of entries) {
+    if (files.length >= limit) break;
+    const childFiles = await readEntryFiles(child, limit - files.length);
+    files.push(...childFiles);
+  }
+  return files;
+}
+
+function readDirectoryEntries(reader) {
+  return new Promise((resolve) => {
+    const entries = [];
+    const readBatch = () => {
+      reader.readEntries(
+        (batch) => {
+          if (!batch.length) {
+            resolve(entries);
+            return;
+          }
+          entries.push(...batch);
+          readBatch();
+        },
+        () => resolve(entries),
+      );
+    };
+    readBatch();
+  });
 }
 
 function normalizeIncomingMessage(message) {
