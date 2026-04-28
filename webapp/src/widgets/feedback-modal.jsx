@@ -131,8 +131,12 @@ export default function FeedbackModal({ onClose }) {
           </div>
         ) : (
           <form className="oc-modal-body" onSubmit={handleSubmit}>
+            <div className="oc-feedback-required-note">
+              标 <span className="oc-required">*</span> 的项目为必填，截图可不上传。
+            </div>
+
             <div className="oc-form-group">
-              <label>反馈类型</label>
+              <label>反馈类型 <span className="oc-required">*</span></label>
               <div className="oc-feedback-category-grid">
                 {CATEGORY_OPTIONS.map((option) => (
                   <button
@@ -159,18 +163,19 @@ export default function FeedbackModal({ onClose }) {
             </div>
 
             <div className="oc-form-group">
-              <label>描述</label>
+              <label>描述 <span className="oc-required">*</span></label>
               <textarea
                 className="oc-input oc-feedback-textarea"
                 value={description}
                 onChange={(event) => setDescription(event.target.value)}
                 maxLength={5000}
+                required
                 placeholder="请描述你遇到的问题、期望效果，或复现步骤。"
               />
             </div>
 
             <div className="oc-form-group">
-              <label>截图说明（最多 {MAX_ATTACHMENTS} 张）</label>
+              <label>截图说明（可选，最多 {MAX_ATTACHMENTS} 张）</label>
               <div
                 className={`oc-feedback-dropzone ${isDragging ? 'dragging' : ''}`}
                 onDragOver={(event) => {

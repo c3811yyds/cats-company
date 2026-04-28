@@ -2324,6 +2324,17 @@ body {
   gap: 8px;
 }
 
+.oc-feedback-required-note {
+  margin-bottom: 14px;
+  color: var(--v3-text-muted);
+  font-size: 12px;
+}
+
+.oc-required {
+  color: #ff7a7a;
+  font-weight: 700;
+}
+
 .oc-feedback-category {
   border: 1px solid var(--v3-border);
   border-radius: 8px;
