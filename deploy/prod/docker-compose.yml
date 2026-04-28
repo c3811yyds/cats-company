@@ -24,6 +24,7 @@ services:
       FEISHU_KEYWORD: "${FEISHU_KEYWORD:-cats-company}"
       FEEDBACK_FEISHU_WEBHOOK_URL: "${FEEDBACK_FEISHU_WEBHOOK_URL:-}"
       FEEDBACK_FEISHU_KEYWORD: "${FEEDBACK_FEISHU_KEYWORD:-}"
+      FEEDBACK_PUBLIC_BASE_URL: "${FEEDBACK_PUBLIC_BASE_URL:-https://app.catsco.cc}"
       APP_ENV: production
       TZ: Asia/Shanghai
     ports:

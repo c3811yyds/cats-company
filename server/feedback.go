@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -213,15 +214,47 @@ func buildFeedbackNotificationText(report *types.FeedbackReport, user *types.Use
 	builder.WriteString("\n描述:\n")
 	builder.WriteString(report.Description)
 	if len(report.Attachments) > 0 {
-		builder.WriteString("\n截图:")
+		builder.WriteString("\n截图（点击可直接打开）:")
 		for _, attachment := range report.Attachments {
 			builder.WriteString("\n- ")
 			if attachment.Name != "" {
 				builder.WriteString(attachment.Name)
 				builder.WriteString(": ")
 			}
-			builder.WriteString(attachment.URL)
+			builder.WriteString(absoluteFeedbackURL(attachment.URL, report.PageURL))
 		}
 	}
 	return builder.String()
+}
+
+func absoluteFeedbackURL(rawURL, pageURL string) string {
+	rawURL = strings.TrimSpace(rawURL)
+	if rawURL == "" {
+		return ""
+	}
+	if strings.HasPrefix(rawURL, "http://") || strings.HasPrefix(rawURL, "https://") {
+		return rawURL
+	}
+
+	baseURL := strings.TrimSpace(os.Getenv("FEEDBACK_PUBLIC_BASE_URL"))
+	if baseURL == "" {
+		baseURL = originFromURL(pageURL)
+	}
+	if baseURL == "" {
+		return rawURL
+	}
+
+	baseURL = strings.TrimRight(baseURL, "/")
+	if strings.HasPrefix(rawURL, "/") {
+		return baseURL + rawURL
+	}
+	return baseURL + "/" + rawURL
+}
+
+func originFromURL(rawURL string) string {
+	parsed, err := url.Parse(strings.TrimSpace(rawURL))
+	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+		return ""
+	}
+	return parsed.Scheme + "://" + parsed.Host
 }
