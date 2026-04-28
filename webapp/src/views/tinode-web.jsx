@@ -5,7 +5,8 @@ import ChatListView from './sidepanel-view';
 import FriendsView from './friends-view';
 import MessagesView from './messages-view';
 import ProfileEditor from '../widgets/profile-editor';
-import { Settings, LogOut } from 'lucide-react';
+import FeedbackModal from '../widgets/feedback-modal';
+import { Bug, Settings, LogOut } from 'lucide-react';
 import CatOrb from '../components/CatOrb/CatOrb';
 import '../css/openchat-theme.css';
 
@@ -45,6 +46,7 @@ export default function TinodeWeb() {
   const [wsStatus, setWsStatus] = useState('disconnected');
   const [showProfileEditor, setShowProfileEditor] = useState(false);
   const [showProfilePopover, setShowProfilePopover] = useState(false);
+  const [showFeedbackModal, setShowFeedbackModal] = useState(false);
 
 
 
@@ -183,6 +185,9 @@ export default function TinodeWeb() {
 
         {showProfilePopover && (
           <div className="v3-profile-popover">
+            <div className="v3-popover-item" onClick={() => { setShowProfilePopover(false); setShowFeedbackModal(true); }}>
+              <Bug size={16} style={{marginRight: 10}} /> 问题反馈与建议
+            </div>
             <div className="v3-popover-item" onClick={() => { setShowProfilePopover(false); setShowProfileEditor(true); }}>
               <Settings size={16} style={{marginRight: 10}} /> Settings & Profile
             </div>
@@ -217,6 +222,10 @@ export default function TinodeWeb() {
           onClose={() => setShowProfileEditor(false)}
           onSaved={handleUserUpdated}
         />
+      )}
+
+      {showFeedbackModal && (
+        <FeedbackModal onClose={() => setShowFeedbackModal(false)} />
       )}
     </div>
   );

@@ -14,6 +14,7 @@ func (a *Adapter) CreateSchema() error {
 		createRateLimitTable,
 		createGroupsTable,
 		createGroupMembersTable,
+		createFeedbackReportsTable,
 	}
 	for _, q := range tables {
 		if _, err := a.db.Exec(q); err != nil {
@@ -179,6 +180,25 @@ CREATE TABLE IF NOT EXISTS group_members (
     UNIQUE KEY uk_group_user (group_id, user_id),
     INDEX idx_gm_user (user_id),
     FOREIGN KEY (group_id) REFERENCES ` + "`groups`" + `(id) ON DELETE CASCADE,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+`
+
+const createFeedbackReportsTable = `
+CREATE TABLE IF NOT EXISTS feedback_reports (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    user_id BIGINT NOT NULL,
+    category ENUM('bug','suggestion','other') NOT NULL DEFAULT 'bug',
+    title VARCHAR(160) DEFAULT '',
+    description TEXT NOT NULL,
+    page_url VARCHAR(1024) DEFAULT '',
+    user_agent VARCHAR(512) DEFAULT '',
+    status ENUM('open','reviewing','resolved','closed') NOT NULL DEFAULT 'open',
+    attachments JSON DEFAULT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    INDEX idx_feedback_user_created (user_id, created_at),
+    INDEX idx_feedback_status_created (status, created_at),
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 `

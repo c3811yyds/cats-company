@@ -2313,6 +2313,128 @@ body {
   color: var(--oc-danger);
 }
 
+.oc-feedback-modal {
+  width: 520px;
+  max-width: calc(100vw - 32px);
+}
+
+.oc-feedback-category-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+
+.oc-feedback-category {
+  border: 1px solid var(--v3-border);
+  border-radius: 8px;
+  background: rgba(255,255,255,0.04);
+  color: var(--v3-text-muted);
+  padding: 9px 10px;
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.oc-feedback-category:hover,
+.oc-feedback-category.active {
+  border-color: var(--v3-primary);
+  color: var(--v3-text-name);
+  background: rgba(16, 185, 129, 0.12);
+}
+
+.oc-feedback-textarea {
+  width: 100%;
+  min-height: 132px;
+  padding: 10px 12px;
+  resize: vertical;
+  font: inherit;
+  line-height: 1.5;
+}
+
+.oc-feedback-dropzone {
+  position: relative;
+  border: 1px dashed var(--v3-border);
+  border-radius: 10px;
+  padding: 18px;
+  text-align: center;
+  color: var(--v3-text-muted);
+  background: rgba(255,255,255,0.03);
+  transition: border-color 0.16s ease, background 0.16s ease;
+}
+
+.oc-feedback-dropzone.dragging,
+.oc-feedback-dropzone:hover {
+  border-color: var(--v3-primary);
+  background: rgba(16, 185, 129, 0.08);
+}
+
+.oc-feedback-dropzone input {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.oc-feedback-dropzone small {
+  display: block;
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--v3-text-muted);
+}
+
+.oc-feedback-preview-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(88px, 1fr));
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.oc-feedback-preview {
+  position: relative;
+  overflow: hidden;
+  border: 1px solid var(--v3-border);
+  border-radius: 8px;
+  background: rgba(0,0,0,0.2);
+  aspect-ratio: 1;
+}
+
+.oc-feedback-preview img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.oc-feedback-preview button {
+  position: absolute;
+  right: 6px;
+  bottom: 6px;
+  border: none;
+  border-radius: 999px;
+  padding: 3px 8px;
+  background: rgba(0,0,0,0.7);
+  color: #fff;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.oc-feedback-success {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.oc-feedback-success-title {
+  color: var(--v3-text-name);
+  font-weight: 700;
+  font-size: 16px;
+}
+
+.oc-feedback-success-text {
+  color: var(--v3-text-muted);
+  line-height: 1.6;
+}
+
 .oc-back-btn {
   background: none;
   border: none;

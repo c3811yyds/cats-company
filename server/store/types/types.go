@@ -22,7 +22,7 @@ type User struct {
 	Phone       string      `json:"phone,omitempty"`
 	DisplayName string      `json:"display_name"`
 	AvatarURL   string      `json:"avatar_url,omitempty"`
-	AccountType AccountType `json:"-"`    // internal only, never exposed to other users
+	AccountType AccountType `json:"-"`             // internal only, never exposed to other users
 	BotDisclose bool        `json:"bot,omitempty"` // if true, disclose bot identity to other users
 	PassHash    []byte      `json:"-"`
 	State       int         `json:"state"`
@@ -128,6 +128,30 @@ type FilePayload struct {
 	MimeType string `json:"mime_type,omitempty"`
 }
 
+// FeedbackAttachment is a screenshot or file attached to a user feedback report.
+type FeedbackAttachment struct {
+	FileKey string `json:"file_key"`
+	URL     string `json:"url"`
+	Name    string `json:"name"`
+	Size    int64  `json:"size"`
+	Type    string `json:"type,omitempty"`
+}
+
+// FeedbackReport is a user-submitted bug report or product suggestion.
+type FeedbackReport struct {
+	ID          int64                `json:"id"`
+	UserID      int64                `json:"user_id"`
+	Category    string               `json:"category"`
+	Title       string               `json:"title,omitempty"`
+	Description string               `json:"description"`
+	PageURL     string               `json:"page_url,omitempty"`
+	UserAgent   string               `json:"user_agent,omitempty"`
+	Status      string               `json:"status"`
+	Attachments []FeedbackAttachment `json:"attachments,omitempty"`
+	CreatedAt   time.Time            `json:"created_at"`
+	UpdatedAt   time.Time            `json:"updated_at"`
+}
+
 // LinkPreviewPayload is the payload for link preview messages.
 type LinkPreviewPayload struct {
 	URL         string `json:"url"`
@@ -184,11 +208,11 @@ type Group struct {
 
 // GroupMember represents a member of a group.
 type GroupMember struct {
-	ID        int64     `json:"id"`
-	GroupID   int64     `json:"group_id"`
-	UserID    int64     `json:"user_id"`
-	Role      string    `json:"role"` // "owner", "admin", "member"
-	JoinedAt  time.Time `json:"joined_at"`
+	ID       int64     `json:"id"`
+	GroupID  int64     `json:"group_id"`
+	UserID   int64     `json:"user_id"`
+	Role     string    `json:"role"` // "owner", "admin", "member"
+	JoinedAt time.Time `json:"joined_at"`
 	// Joined fields from user table (populated by queries)
 	Username    string `json:"username,omitempty"`
 	DisplayName string `json:"display_name,omitempty"`
@@ -198,8 +222,8 @@ type GroupMember struct {
 
 // RateLimitConfig defines rate limits per account type.
 type RateLimitConfig struct {
-	AccountType    AccountType `json:"account_type"`
-	MaxPerSecond   int         `json:"max_per_second"`
-	MaxPerMinute   int         `json:"max_per_minute"`
-	BurstSize      int         `json:"burst_size"`
+	AccountType  AccountType `json:"account_type"`
+	MaxPerSecond int         `json:"max_per_second"`
+	MaxPerMinute int         `json:"max_per_minute"`
+	BurstSize    int         `json:"burst_size"`
 }

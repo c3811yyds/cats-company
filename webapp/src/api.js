@@ -182,6 +182,8 @@ export const api = {
     if (!res.ok) throw new Error(data.error || 'Upload failed');
     return data;
   },
+  uploadFeedbackImage: (file) => api.uploadFile(file, 'feedback'),
+  submitFeedback: (data) => request('POST', '/api/feedback', data),
 };
 
 // --- WebSocket ---

@@ -15,10 +15,14 @@ import (
 )
 
 const (
-	maxImageSize = 1 << 30   // 1GB
-	maxFileSize  = 1 << 30   // 1GB
+	maxImageSize = 1 << 30 // 1GB
+	maxFileSize  = 1 << 30 // 1GB
 	uploadDir    = "uploads"
 )
+
+var allowedImageExts = map[string]bool{
+	".jpg": true, ".jpeg": true, ".png": true, ".gif": true, ".webp": true,
+}
 
 // Allowed image MIME types
 var allowedImageTypes = map[string]bool{
@@ -49,6 +53,7 @@ type UploadHandler struct {
 func NewUploadHandler(baseDir, baseURL string) *UploadHandler {
 	os.MkdirAll(filepath.Join(baseDir, "images"), 0755)
 	os.MkdirAll(filepath.Join(baseDir, "files"), 0755)
+	os.MkdirAll(filepath.Join(baseDir, "feedback"), 0755)
 	return &UploadHandler{baseDir: baseDir, baseURL: baseURL}
 }
 
@@ -62,7 +67,8 @@ func (h *UploadHandler) HandleUpload(w http.ResponseWriter, r *http.Request) {
 	// Parse multipart form
 	uploadType := r.URL.Query().Get("type") // "image" or "file"
 	maxSize := maxFileSize
-	if uploadType == "image" {
+	isImageUpload := uploadType == "image" || uploadType == "feedback"
+	if isImageUpload {
 		maxSize = maxImageSize
 	}
 
@@ -81,13 +87,17 @@ func (h *UploadHandler) HandleUpload(w http.ResponseWriter, r *http.Request) {
 
 	// Validate file extension
 	ext := strings.ToLower(filepath.Ext(header.Filename))
-	if !allowedFileExts[ext] {
+	if isImageUpload && !allowedImageExts[ext] {
+		writeUploadJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid image type"})
+		return
+	}
+	if !isImageUpload && !allowedFileExts[ext] {
 		writeUploadJSON(w, http.StatusBadRequest, map[string]string{"error": "file type not allowed"})
 		return
 	}
 
 	// For images, also validate MIME type
-	if uploadType == "image" {
+	if isImageUpload {
 		contentType := header.Header.Get("Content-Type")
 		if !allowedImageTypes[contentType] {
 			writeUploadJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid image type"})
@@ -100,6 +110,8 @@ func (h *UploadHandler) HandleUpload(w http.ResponseWriter, r *http.Request) {
 	subDir := "files"
 	if uploadType == "image" {
 		subDir = "images"
+	} else if uploadType == "feedback" {
+		subDir = "feedback"
 	}
 
 	destPath := filepath.Join(h.baseDir, subDir, fileKey)
