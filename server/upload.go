@@ -9,7 +9,9 @@ import (
 	"io"
 	"net/http"
 	"os"
+	urlpath "path"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 )
@@ -23,6 +25,14 @@ const (
 var allowedImageExts = map[string]bool{
 	".jpg": true, ".jpeg": true, ".png": true, ".gif": true, ".webp": true,
 }
+
+var allowedUploadDirs = map[string]bool{
+	"images":   true,
+	"files":    true,
+	"feedback": true,
+}
+
+var uploadFileNamePattern = regexp.MustCompile(`^\d{8}_[a-f0-9]{32}\.[a-z0-9]+$`)
 
 // Allowed image MIME types
 var allowedImageTypes = map[string]bool{
@@ -147,13 +157,51 @@ func (h *UploadHandler) HandleUpload(w http.ResponseWriter, r *http.Request) {
 
 // HandleServeFile handles GET /uploads/* - serves uploaded files.
 func (h *UploadHandler) HandleServeFile(w http.ResponseWriter, r *http.Request) {
-	// Strip the /uploads/ prefix
-	path := strings.TrimPrefix(r.URL.Path, "/uploads/")
-	if path == "" || strings.Contains(path, "..") {
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	relPath := strings.TrimPrefix(r.URL.Path, "/uploads/")
+	cleanPath := urlpath.Clean("/" + relPath)
+	parts := strings.Split(strings.TrimPrefix(cleanPath, "/"), "/")
+	if len(parts) != 2 {
 		http.NotFound(w, r)
 		return
 	}
-	fullPath := filepath.Join(h.baseDir, path)
+
+	subDir, fileName := parts[0], parts[1]
+	if !allowedUploadDirs[subDir] || !uploadFileNamePattern.MatchString(fileName) {
+		http.NotFound(w, r)
+		return
+	}
+
+	ext := strings.ToLower(filepath.Ext(fileName))
+	if (subDir == "images" || subDir == "feedback") && !allowedImageExts[ext] {
+		http.NotFound(w, r)
+		return
+	}
+	if subDir == "files" && !allowedFileExts[ext] {
+		http.NotFound(w, r)
+		return
+	}
+
+	baseDir, err := filepath.Abs(filepath.Join(h.baseDir, subDir))
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	fullPath, err := filepath.Abs(filepath.Join(baseDir, fileName))
+	if err != nil || !strings.HasPrefix(fullPath, baseDir+string(os.PathSeparator)) {
+		http.NotFound(w, r)
+		return
+	}
+
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.Header().Set("Referrer-Policy", "no-referrer")
+	if subDir == "files" {
+		w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", fileName))
+	}
 	http.ServeFile(w, r, fullPath)
 }
 
