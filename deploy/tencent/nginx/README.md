@@ -1,9 +1,9 @@
-# Tencent host nginx
+# Host nginx
 
-These host-level nginx configs terminate TLS on the Tencent CVM and proxy to
-the Docker stacks bound to `127.0.0.1`.
+These host-level nginx configs terminate TLS on the production host and proxy
+to the Docker stacks bound to `127.0.0.1`.
 
-The Tencent CVM uses Let's Encrypt certificates managed by certbot:
+The production host uses Let's Encrypt certificates managed by certbot:
 
 - `api.catsco.cc`
 - `app.catsco.cc`
