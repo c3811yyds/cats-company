@@ -327,138 +327,138 @@ export default function ServiceAgentsPanel({ onClose }) {
             <summary className="v3-service-agents-advanced-head">
               更多设置（默认：公开 · 在我的电脑上跑 · 免费分享）
             </summary>
-          <div className="v3-service-agents-field">
-            <span>可见性</span>
-            <div className="v3-service-agents-choices">
-              <label>
-                <input
-                  type="radio"
-                  name="visibility"
-                  checked={form.visibility === 'private'}
-                  onChange={() => updateForm({ visibility: 'private' })}
-                />
-                仅自己
-              </label>
-              <label>
-                <input
-                  type="radio"
-                  name="visibility"
-                  checked={form.visibility === 'public'}
-                  onChange={() => updateForm({ visibility: 'public' })}
-                />
-                公开（别人也能调用）
-              </label>
+            <div className="v3-service-agents-field">
+              <span>可见性</span>
+              <div className="v3-service-agents-choices">
+                <label>
+                  <input
+                    type="radio"
+                    name="visibility"
+                    checked={form.visibility === 'private'}
+                    onChange={() => updateForm({ visibility: 'private' })}
+                  />
+                  仅自己
+                </label>
+                <label>
+                  <input
+                    type="radio"
+                    name="visibility"
+                    checked={form.visibility === 'public'}
+                    onChange={() => updateForm({ visibility: 'public' })}
+                  />
+                  公开（别人也能调用）
+                </label>
+              </div>
             </div>
-          </div>
-          <div className="v3-service-agents-field">
-            <span>执行位置</span>
-            <div className="v3-service-agents-choices">
-              <label>
-                <input
-                  type="radio"
-                  name="runner"
-                  checked={form.runner === 'worker'}
-                  onChange={() => updateForm({ runner: 'worker' })}
-                />
-                我的电脑（推荐）
-              </label>
-              <label>
-                <input
-                  type="radio"
-                  name="runner"
-                  checked={form.runner === 'http'}
-                  onChange={() => updateForm({ runner: 'http' })}
-                />
-                HTTP 服务
-              </label>
-              <label>
-                <input
-                  type="radio"
-                  name="runner"
-                  checked={form.runner === 'mcp'}
-                  onChange={() => updateForm({ runner: 'mcp' })}
-                />
-                MCP 服务
-              </label>
+            <div className="v3-service-agents-field">
+              <span>执行位置</span>
+              <div className="v3-service-agents-choices">
+                <label>
+                  <input
+                    type="radio"
+                    name="runner"
+                    checked={form.runner === 'worker'}
+                    onChange={() => updateForm({ runner: 'worker' })}
+                  />
+                  我的电脑（推荐）
+                </label>
+                <label>
+                  <input
+                    type="radio"
+                    name="runner"
+                    checked={form.runner === 'http'}
+                    onChange={() => updateForm({ runner: 'http' })}
+                  />
+                  HTTP 服务
+                </label>
+                <label>
+                  <input
+                    type="radio"
+                    name="runner"
+                    checked={form.runner === 'mcp'}
+                    onChange={() => updateForm({ runner: 'mcp' })}
+                  />
+                  MCP 服务
+                </label>
+              </div>
             </div>
-          </div>
-          {form.runner === 'http' || form.runner === 'mcp' ? (
-            <label className="v3-service-agents-field">
-              <span>{form.runner === 'mcp' ? 'MCP 服务地址' : '服务地址'}</span>
-              <input
-                value={form.url}
-                onChange={(event) => updateForm({ url: event.target.value })}
-                placeholder={form.runner === 'mcp' ? 'https://your-host/mcp' : 'https://your-host/run'}
-                spellCheck={false}
-              />
-              {form.runner === 'mcp' ? (
+            {form.runner === 'http' || form.runner === 'mcp' ? (
+              <label className="v3-service-agents-field">
+                <span>{form.runner === 'mcp' ? 'MCP 服务地址' : '服务地址'}</span>
+                <input
+                  value={form.url}
+                  onChange={(event) => updateForm({ url: event.target.value })}
+                  placeholder={form.runner === 'mcp' ? 'https://your-host/mcp' : 'https://your-host/run'}
+                  spellCheck={false}
+                />
+                {form.runner === 'mcp' ? (
+                  <span className="v3-service-agents-field-hint">
+                    平台会当 MCP 客户端连它并调用工具，不需要你自己的 worker
+                  </span>
+                ) : null}
+              </label>
+            ) : (
+              <label className="v3-service-agents-field">
+                <span>本机执行命令（这个应用用哪个 agent 跑）</span>
+                <input
+                  value={form.command}
+                  onChange={(event) => updateForm({ command: event.target.value })}
+                  placeholder="claude -p {input_file}"
+                  spellCheck={false}
+                />
                 <span className="v3-service-agents-field-hint">
-                  平台会当 MCP 客户端连它并调用工具，不需要你自己的 worker
+                  每个应用各填各的；{'{input_file}'} 会替换成这次调用的输入文件。留空则调用时会报错。
                 </span>
-              ) : null}
-            </label>
-          ) : (
-            <label className="v3-service-agents-field">
-              <span>本机执行命令（这个应用用哪个 agent 跑）</span>
-              <input
-                value={form.command}
-                onChange={(event) => updateForm({ command: event.target.value })}
-                placeholder="claude -p {input_file}"
-                spellCheck={false}
-              />
+              </label>
+            )}
+            {form.runner === 'mcp' ? (
+              <label className="v3-service-agents-field">
+                <span>工具名（留空=对端只有一个工具时自动选）</span>
+                <input
+                  value={form.tool}
+                  onChange={(event) => updateForm({ tool: event.target.value })}
+                  placeholder="run"
+                  spellCheck={false}
+                />
+              </label>
+            ) : null}
+            <div className="v3-service-agents-field">
+              <span>计费方式（留空=免费分享）</span>
+              <div className="v3-service-agents-choices">
+                <label>
+                  <input
+                    type="radio"
+                    name="priceUnit"
+                    checked={form.priceUnit === 'token'}
+                    onChange={() => updateForm({ priceUnit: 'token' })}
+                  />
+                  按用量（每千 tokens）
+                </label>
+                <label>
+                  <input
+                    type="radio"
+                    name="priceUnit"
+                    checked={form.priceUnit === 'second'}
+                    onChange={() => updateForm({ priceUnit: 'second' })}
+                  />
+                  按运行时长（每秒）
+                </label>
+              </div>
               <span className="v3-service-agents-field-hint">
-                每个应用各填各的；{'{input_file}'} 会替换成这次调用的输入文件。留空则调用时会报错。
+                {form.priceUnit === 'second'
+                  ? '按实际跑了多少秒算，平台自己就能测，不依赖 agent 上报。'
+                  : '要你的 agent 上报 token 用量才计费（多数 CLI 不上报，那就按运行时长更靠谱）。'}
               </span>
-            </label>
-          )}
-          {form.runner === 'mcp' ? (
+            </div>
             <label className="v3-service-agents-field">
-              <span>工具名（留空=对端只有一个工具时自动选）</span>
+              <span>{form.priceUnit === 'second' ? '每秒多少钱（元）' : '每千 tokens 多少钱（元）'}</span>
               <input
-                value={form.tool}
-                onChange={(event) => updateForm({ tool: event.target.value })}
-                placeholder="run"
-                spellCheck={false}
+                value={form.price}
+                onChange={(event) => updateForm({ price: event.target.value })}
+                placeholder={form.priceUnit === 'second' ? '0.01' : '2'}
+                inputMode="decimal"
               />
             </label>
-          ) : null}
-          <div className="v3-service-agents-field">
-            <span>计费方式（留空=免费分享）</span>
-            <div className="v3-service-agents-choices">
-              <label>
-                <input
-                  type="radio"
-                  name="priceUnit"
-                  checked={form.priceUnit === 'token'}
-                  onChange={() => updateForm({ priceUnit: 'token' })}
-                />
-                按用量（每千 tokens）
-              </label>
-              <label>
-                <input
-                  type="radio"
-                  name="priceUnit"
-                  checked={form.priceUnit === 'second'}
-                  onChange={() => updateForm({ priceUnit: 'second' })}
-                />
-                按运行时长（每秒）
-              </label>
-            </div>
-            <span className="v3-service-agents-field-hint">
-              {form.priceUnit === 'second'
-                ? '按实际跑了多少秒算，平台自己就能测，不依赖 agent 上报。'
-                : '要你的 agent 上报 token 用量才计费（多数 CLI 不上报，那就按运行时长更靠谱）。'}
-            </span>
-          </div>
-          <label className="v3-service-agents-field">
-            <span>{form.priceUnit === 'second' ? '每秒多少钱（元）' : '每千 tokens 多少钱（元）'}</span>
-            <input
-              value={form.price}
-              onChange={(event) => updateForm({ price: event.target.value })}
-              placeholder={form.priceUnit === 'second' ? '0.01' : '2'}
-              inputMode="decimal"
-            />
-          </label>
           </details>
           {publishError ? <div className="v3-service-agents-error" role="alert">{publishError}</div> : null}
           <div className="v3-service-agents-publish-actions">
