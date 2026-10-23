@@ -274,10 +274,53 @@ describe('ServiceAgentsPanel', () => {
 
     const banner = container.querySelector('.v3-service-agents-published');
     expect(banner?.textContent).toContain('catsco_my-agent');
-    expect(banner?.textContent).toContain('service-run-worker -agents my-agent');
-    // 首次发布自动带上连接密钥：用户只需复制一行，不用自己找凭据。
-    expect(mocks.createServiceWorkerCredential).toHaveBeenCalledTimes(1);
-    expect(banner?.textContent).toContain(`-token cwk_${'a'.repeat(64)}`);
+    // 凭证对普通用户不可理解，界面上一律不出现：不生成密钥、不给启动命令。
+    expect(mocks.createServiceWorkerCredential).not.toHaveBeenCalled();
+    expect(banner?.textContent).not.toContain('service-run-worker');
+    expect(banner?.textContent).not.toContain('-token');
+    expect(banner?.textContent).not.toContain('cwk_');
+    // 只告诉用户：在要跑这个应用的那台电脑上登录桌面端就行。
+    expect(banner?.textContent).toContain('小八');
+    expect(banner?.textContent).toContain('自动接单');
+  });
+
+  // 「密钥 / 命令」这类东西用户完全看不懂，也就无法判断对错，因此从面板里彻底拿掉；
+  // 老用户即使后台还有旧密钥，界面也不该再甩给他一条要粘贴的命令。
+  it('发布后不给命令也不给密钥，只提示在桌面端登录即可', async () => {
+    mocks.publishServiceAgent.mockResolvedValueOnce({ slug: 'legacy', version: 1, visibility: 'public' });
+    await renderPanel();
+    await act(async () => {
+      container.querySelector('button[aria-label="发布应用"]').click();
+      await Promise.resolve();
+    });
+    const form = container.querySelector('.v3-service-agents-publish');
+    const setValue = (node, value) => {
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+      setter.call(node, value);
+      node.dispatchEvent(new Event('input', { bubbles: true }));
+    };
+    const [nameInput, slugInput] = form.querySelectorAll('input:not([type])');
+    await act(async () => {
+      setValue(nameInput, 'Legacy');
+      setValue(slugInput, 'legacy');
+      await Promise.resolve();
+    });
+    await act(async () => {
+      form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(mocks.createServiceWorkerCredential).not.toHaveBeenCalled();
+    const banner = container.querySelector('.v3-service-agents-published');
+    expect(banner.textContent).toContain('catsco_legacy');
+    expect(banner.textContent).not.toContain('service-run-worker');
+    expect(banner.textContent).not.toContain('-token');
+    expect(banner.textContent).not.toContain('cwk_');
+    expect(banner.textContent).not.toContain('连接密钥');
+    // 整个面板（不只是横幅）都不该出现任何密钥痕迹
+    expect(container.textContent).not.toContain('cwk_');
+    expect(container.textContent).not.toContain('连接密钥');
   });
 
   // 按调用次数收费与真实开销无关（一次可能只是打招呼，也可能跑十分钟），
@@ -382,10 +425,11 @@ describe('ServiceAgentsPanel', () => {
       type: 'worker',
       command: 'claude -p {input_file}',
     });
-    // 命令随应用下发，worker 不再需要 -cmd
+    // 命令随应用下发，worker 不再需要 -cmd；也不再把启动命令甩给用户
     const banner = container.querySelector('.v3-service-agents-published');
-    expect(banner.textContent).toContain('service-run-worker -agents claude-helper');
+    expect(banner.textContent).not.toContain('service-run-worker');
     expect(banner.textContent).not.toContain('-cmd');
+    expect(banner.textContent).toContain('catsco_claude-helper');
   });
 
   it('发布 MCP 服务：runner.type=mcp 带地址与工具名', async () => {
@@ -545,38 +589,5 @@ describe('ServiceAgentsPanel', () => {
     expect(container.querySelector('.v3-service-agent-slug')?.textContent).toBe('catsco_my-local');
     expect(container.querySelector('.v3-service-agents-notice')).toBeNull();
   });
-
-  it('生成本机 worker 凭据：一次性展示明文，撤销后从列表消失', async () => {
-    await renderPanel();
-    const generate = [...container.querySelectorAll('.v3-service-worker-credentials-head button')]
-      .find((node) => node.textContent.includes('生成'));
-    expect(generate).toBeTruthy();
-
-    await act(async () => {
-      generate.click();
-      await Promise.resolve();
-      await Promise.resolve();
-    });
-
-    expect(mocks.createServiceWorkerCredential).toHaveBeenCalled();
-    const issued = container.querySelector('.v3-service-worker-credentials-issued');
-    expect(issued?.textContent).toContain('只显示这一次');
-    // 明文出现在可复制的 code 里（仅这一次）
-    expect(issued?.querySelector('code')?.textContent).toBe(`cwk_${'a'.repeat(64)}`);
-    // 列表里只显示短前缀
-    const row = container.querySelector('.v3-service-worker-credentials-list li');
-    expect(row?.textContent).toContain('cwk_aaaaaaaa');
-    expect(row?.textContent).not.toContain('a'.repeat(64));
-
-    const revoke = [...container.querySelectorAll('.v3-service-worker-credentials-list button')]
-      .find((node) => node.textContent.includes('撤销'));
-    await act(async () => {
-      revoke.click();
-      await Promise.resolve();
-      await Promise.resolve();
-    });
-    expect(mocks.revokeServiceWorkerCredential).toHaveBeenCalledWith(11);
-    expect(container.querySelector('.v3-service-worker-credentials-list')).toBeNull();
-    expect(container.querySelector('.v3-service-worker-credentials-issued')).toBeNull();
-  });
 });
+
